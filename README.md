@@ -56,13 +56,13 @@ or
 node index.js
 ```
 
-## Render PostgreSQL data management
+## Railway PostgreSQL data management
 
-This project keeps runtime compatibility by using one local SQLite file and syncing it to Render PostgreSQL.
+This project keeps runtime compatibility by using one local SQLite file and syncing it to Railway PostgreSQL.
 
-Set these env vars on Render:
+Set these env vars on Railway (see `.env.example` for the full list):
 
-- DATABASE_URL=<Render PostgreSQL URL>
+- DATABASE_URL=<Railway PostgreSQL URL — auto-set by Railway Postgres plugin>
 - POSTGRES_SYNC_ENABLED=true
 - POSTGRES_SNAPSHOT_ID=main
 - POSTGRES_SYNC_INTERVAL_MS=30000
@@ -130,21 +130,22 @@ Notes:
 - Existing tables are migrated safely using ALTER TABLE ADD COLUMN IF NOT EXISTS.
 - Checksums are validated before restore.
 
-## Initial Render Deploy Steps
+## Initial Railway Deploy Steps
 
-1. Add env vars:
+1. Create a new Railway project and link this repository.
+2. Add a **PostgreSQL** database plugin in Railway (this auto-sets `DATABASE_URL`).
+3. Add the following env vars in the Railway service settings:
 	 - UNIFIED_DISCORD_TOKEN
 	 - UNIFIED_CLIENT_ID
 	 - UNIFIED_DEVELOPER_ID (optional)
 	 - UNIFIED_GUILD_ID (optional)
 	 - UNIFIED_DB_PATH (recommended: data/unified.db)
-	 - DATABASE_URL
 	 - POSTGRES_SYNC_ENABLED=true
 	 - POSTGRES_SNAPSHOT_ID=main
 	 - POSTGRES_SYNC_INTERVAL_MS=30000
 	 - POSTGRES_HISTORY_KEEP=2
-2. Deploy worker with start command: npm start
-3. Confirm logs:
+4. Railway detects `railway.json` and runs `npm start` automatically.
+5. Confirm logs:
 	 - [postgres-sync] no valid remote snapshot found; using local sqlite file. (first deploy expected)
 	 - [postgres-sync] uploaded sqlite snapshot to PostgreSQL.
 
