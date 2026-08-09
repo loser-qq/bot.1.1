@@ -1258,6 +1258,35 @@ function deleteGachaPanel(guildId, panelKey) {
   return tx();
 }
 
+function getVcTransferCount(guildId) {
+  try {
+    const row = db.prepare('SELECT COUNT(*) as count FROM vc_transfer_settings WHERE guild_id = ?').get(guildId);
+    return row ? row.count : 0;
+  } catch (_) { return 0; }
+}
+
+function getTicketPanelCount(guildId) {
+  try {
+    const row = db.prepare('SELECT COUNT(*) as count FROM ticket_panels WHERE guild_id = ?').get(guildId);
+    return row ? row.count : 0;
+  } catch (_) { return 0; }
+}
+
+function getReactionRoleMessageCount(guildId) {
+  try {
+    const row = db.prepare('SELECT COUNT(*) as count FROM reaction_role_messages WHERE guild_id = ?').get(guildId);
+    return row ? row.count : 0;
+  } catch (_) { return 0; }
+}
+
+function getAppStateJson(namespace, key) {
+  try {
+    const row = db.prepare('SELECT value_json FROM app_state WHERE namespace = ? AND state_key = ?').get(namespace, key);
+    if (!row?.value_json) return null;
+    return JSON.parse(row.value_json);
+  } catch (_) { return null; }
+}
+
 module.exports = {
   getBalance,
   setBalance,
@@ -1366,4 +1395,8 @@ module.exports = {
   setBoxGachaLogChannel,
   getBoxGachaLogChannel,
   drawBoxGacha,
+  getVcTransferCount,
+  getTicketPanelCount,
+  getReactionRoleMessageCount,
+  getAppStateJson,
 };

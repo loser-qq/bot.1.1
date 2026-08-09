@@ -142,101 +142,134 @@ function buildCommandListEmbed() {
   return new EmbedBuilder()
     .setTitle('📋 コマンド一覧')
     .setColor(0x5865f2)
-    .setDescription('コマンド一覧を表示します。')
+    .setDescription('このBOTで使えるコマンドの一覧です。`[管理者]` は管理者権限が必要、`[開発者]` は開発者専用です。')
     .addFields(
       {
-        name: '通貨',
+        name: '🎙 コミュニティ — VC・チケット・ロール',
         value: [
-          '`/送金 @ユーザー 金額` ユーザー間送金',
-          '`/付与 @ユーザー 金額` 管理者または許可ロールによる付与',
-          '`/減額 @ユーザー 金額` 管理者または許可ロールによる減額',
-          '`/通貨単位設定 単位` 通貨単位の変更',
-          '`/送金ログチャンネル #チャンネル` 送金ログ送信先の設定',
-          '`/付与ログチャンネル #チャンネル` 付与ログ送信先の設定',
-          '`/減額ログチャンネル #チャンネル` 減額ログ送信先の設定',
+          '`/vc転送 親vc vcベース名 作成先カテゴリ [ロール...]` [管理者] 親VC参加者を子VCに自動転送',
+          '`/vcパネル` [管理者] 公開のVC設定パネルを設置',
+          '`/チケットパネル タイトル 説明 ラベル 作成先カテゴリ 保存先チャンネル 自動送信メッセージ [ロール1-3]` [管理者] チケットパネルを設置',
+          '`/リアクションロールメッセージ メッセージ リアクション` [管理者] リアクションロール用メッセージを送信',
+          '`/リアクションロールセット` [管理者] リアクションロールのロールを設定',
+          '`/固定メッセージ タイトル 説明` [管理者] チャンネルに常時最新で表示されるEmbedを設置',
+          '`/nuke モード(recreate|purge)` [管理者] チャンネルをリセット',
+          '`/入室ログ #チャンネル` [管理者] 参加通知チャンネルを設定',
+          '`/退出ログ #チャンネル` [管理者] 退出通知チャンネルを設定',
+          '`/status` [管理者] statusカテゴリの統計チャンネルを作成/更新',
+          '`/メッセージリンク表示 状態(on|off)` [管理者] メッセージリンク自動表示を切替',
+          '`/bot送信 メッセージリンク` メッセージリンク先の本文をBOTが送信',
         ].join('\n'),
       },
       {
-        name: '自販機',
+        name: '💰 経済 — 通貨・送金',
         value: [
-          '`/自販機パネル設置 パネルID #チャンネル タイトル 説明` 購入ボタン付き自販機パネルを設置',
-          '`/自販機商品設定 設定 パネルID スロット 商品名 ロール 値段 時間(分)` 商品を設定/更新',
-          '`/自販機商品設定 削除 パネルID スロット` 商品を削除',
+          '`/送金 @ユーザー 金額` ユーザー間で送金',
+          '`/付与 @ユーザー 金額` [管理者] 通貨を付与',
+          '`/減額 @ユーザー 金額` [管理者] 通貨を減額',
+          '`/通貨単位設定 単位` [管理者] 通貨単位を変更',
+          '`/送金ログチャンネル #チャンネル` [管理者] 送金ログ送信先を設定',
+          '`/付与ログチャンネル #チャンネル` [管理者] 付与ログ送信先を設定',
+          '`/減額ログチャンネル #チャンネル` [管理者] 減額ログ送信先を設定',
+        ].join('\n'),
+      },
+      {
+        name: '🛒 自販機',
+        value: [
+          '`/自販機パネル設置 パネルID #チャンネル タイトル 説明` [管理者] 購入ボタン付き自販機パネルを設置',
+          '`/自販機商品設定 設定 パネルID スロット 商品名 ロール 値段 時間(分)` [管理者] 商品を設定/更新',
+          '`/自販機商品設定 削除 パネルID スロット` [管理者] 商品を削除',
           '`/自販機商品設定 一覧 パネルID [表示]` 商品一覧を表示',
-          '`/自販機ログチャンネル パネルID #チャンネル` 購入ログ送信先を設定',
-          '`/vc自販機パネル設置 パネルID #チャンネル タイトル 説明` VC公開/非公開の購入パネルを設置',
-          '`/vc自販機パネル削除 パネルID` VC自販機パネルを削除',
-          '`/vc自販機商品設定 設定 パネルID スロット 商品名 対象VC 公開設定 値段 時間(分)` 商品を設定/更新',
-          '`/vc自販機商品設定 削除 パネルID スロット` 商品を削除',
+          '`/自販機ログチャンネル パネルID #チャンネル` [管理者] 購入ログ送信先を設定',
+          '`/vc自販機パネル設置 パネルID #チャンネル タイトル 説明` [管理者] VC公開/非公開の購入パネルを設置',
+          '`/vc自販機パネル削除 パネルID` [管理者] VC自販機パネルを削除',
+          '`/vc自販機商品設定 設定 パネルID スロット 商品名 対象VC 公開設定 値段 時間(分)` [管理者] 商品を設定/更新',
+          '`/vc自販機商品設定 削除 パネルID スロット` [管理者] 商品を削除',
           '`/vc自販機商品設定 一覧 パネルID [表示]` 商品一覧を表示',
-          '`/vc自販機ログチャンネル パネルID #チャンネル` 購入ログ送信先を設定',
+          '`/vc自販機ログチャンネル パネルID #チャンネル` [管理者] 購入ログ送信先を設定',
         ].join('\n'),
       },
       {
-        name: '面接通過ワークフロー',
+        name: '🎤 面接通過ワークフロー',
         value: [
-          '`/面接通過許可ロール @ロール` /面接通過 の実行権限ロールを設定',
-          '`/面接設定 @外すロール @付与するロール 付与金額` 面接処理内容を設定',
-          '`/面接通過` VC参加者に一括処理を実行',
-          '`/面接通過ログチャンネル #チャンネル` 面接通過ログ送信先の設定',
+          '`/面接通過許可ロール @ロール` [管理者] /面接通過 の実行権限ロールを設定',
+          '`/面接設定 @外すロール @付与するロール 付与金額` [管理者] 面接処理内容を設定',
+          '`/面接通過` VC参加者に一括処理を実行（許可ロール必要）',
+          '`/面接通過ログチャンネル #チャンネル` [管理者] 面接通過ログ送信先を設定',
         ].join('\n'),
       },
       {
-        name: '評価関連',
+        name: '⭐ 評価関連',
         value: [
-          '`/評価期限設定 日数 対象ロール` 評価期限日数と評価期限を表示する対象ロールを設定',
-          '`/ロール表示除外設定 [表示ロール1] [表示ロール2] [表示ロール3]` 対象外メンバーに表示するロールを最大3つ設定（未指定で解除）',
-          '`/評価リセット [ユーザー]` 開発者向けに評価情報をリセット（未指定で全員）',
-          '`/評価一覧 [表示]` 開発者向けに評価情報の一覧を表示',
+          '`/評価期限設定 日数 対象ロール` [管理者] 評価期限日数と対象ロールを設定',
+          '`/ロール表示除外設定 [表示ロール1-3]` [管理者] 対象外メンバーへの表示ロールを設定（未指定で解除）',
+          '`/評価リセット [ユーザー]` [開発者] 評価情報をリセット（未指定で全員）',
+          '`/評価一覧 [表示]` [開発者] 評価情報の一覧を表示',
         ].join('\n'),
       },
       {
-        name: 'VCレベリング',
+        name: '📈 VCレベリング',
         value: [
-          '`/レベリングログチャンネル #チャンネル` レベルアップログ送信先の設定',
-          '`/レベリング設定 時間設定` レベルごとの必要VC参加時間を設定',
-          '`/レベリング設定 時間一括設定` 10レベル分まとめて必要VC参加時間を設定',
-          '`/レベリング設定 ロール設定` レベル範囲に対応するロールを設定',
+          '`/レベリングログチャンネル #チャンネル` [管理者] レベルアップログ送信先を設定',
+          '`/レベリング設定 時間設定 レベル 必要分` [管理者] レベルごとの必要VC参加時間を設定',
+          '`/レベリング設定 時間一括設定 開始レベル 必要分` [管理者] 10レベル分まとめて設定',
+          '`/レベリング設定 ロール設定 開始レベル 終了レベル ロール` [管理者] レベル範囲対応ロールを設定',
           '`/自分 [表示]` 自分の残高とVCレベルを確認',
-          '`/ユーザー情報 ユーザー [表示]` 開発者向けに指定ユーザーの情報を確認',
           '`/vc接続時間ランキング [表示]` VC接続時間TOP10を表示',
+          '`/ユーザー情報 ユーザー [表示]` [開発者] 指定ユーザーの情報を確認',
         ].join('\n'),
       },
       {
-        name: 'ガチャ',
+        name: '🎰 ガチャ',
         value: [
-          '`/ガチャ作成` 箱ガチャを作成・価格設定',
-          '`/商品追加` 商品名・数量・レアリティを登録',
-          '`/商品削除` 商品を削除',
+          '`/ガチャ作成` [管理者] 箱ガチャを作成・価格設定',
+          '`/商品追加` [管理者] 商品名・数量・レアリティを登録',
+          '`/商品削除` [管理者] 商品を削除',
           '`/商品一覧` 商品一覧を表示',
-          '`/ガチャ設置` 4ボタン付きガチャパネルを設置',
+          '`/ガチャ設置` [管理者] 4ボタン付きガチャパネルを設置',
           '`/ガチャ情報` ガチャ設定を表示',
           '`/提供割合` 残数から割合を表示',
-          '`/ガチャログ` 抽選ログ送信先を設定',
-          '`/次の商品` 次回抽選の商品を固定',
-          '`/ガチャリセット` 在庫を初期値に戻す',
+          '`/ガチャログ #チャンネル` [管理者] 抽選ログ送信先を設定',
+          '`/次の商品` [管理者] 次回抽選の商品を固定',
+          '`/ガチャリセット` [管理者] 在庫を初期値に戻す',
         ].join('\n'),
       },
       {
-        name: '管理・開発者向け',
+        name: '💼 給与',
         value: [
-          '`/vc接続時間リセット ユーザー` 開発者向けに指定ユーザーのVC接続時間をリセット',
-          '`/vc接続時間全リセット` 開発者向けに全ユーザーのVC接続時間をリセット',
-          '`/残高全額リセット ユーザー` 開発者向けに指定ユーザーの残高を0にリセット',
-          '`/残高全額全リセット` 開発者向けに全ユーザーの残高を0にリセット',
-          '`/給与設定 ロール 金額` ロールごとの給与を設定',
-          '`/給与設定解除 ロール` ロール給与設定を解除',
-          '`/給与設定一覧` ロール給与設定の一覧を表示',
-          '`/給与一括付与 ロール` 指定ロールへ給与を一括付与',
-          '`/給与全ロール一括付与` 設定済みロールすべてに一括付与',
-          '`/コマンド一覧` コマンド一覧を表示',
-          '`/設定状況` サーバー設定状況を表示',
-          '`/bot情報` 参加サーバー一覧と招待リンクを表示',
+          '`/給与設定 ロール 金額` [管理者] ロールごとの給与を設定',
+          '`/給与設定解除 ロール` [管理者] ロール給与設定を解除',
+          '`/給与設定一覧 [表示]` [管理者] ロール給与設定の一覧を表示',
+          '`/給与一括付与 ロール` [管理者] 指定ロールのメンバーへ給与を一括付与',
+          '`/給与全ロール一括付与` [管理者] 設定済みロールすべてに一括付与',
         ].join('\n'),
       },
       {
-        name: '表示設定',
-        value: '一部の情報系コマンドは「公開 / 非公開」を選べます。',
+        name: '🛡 セキュリティ',
+        value: [
+          '`/状態` 現在の対策設定と招待管理状態を表示',
+          '`/モデレーションログ設定 #チャンネル` モデレーションログチャンネルを設定',
+          '`/招待ログ設定 #チャンネル` 招待ログチャンネルを設定',
+          '`/タイムアウト設定 分` タイムアウト時間を設定',
+          '`/スパム設定 回数 時間(ms)` スパム検知のしきい値を設定',
+          '`/レイド設定 回数 時間(ms)` レイド検知のしきい値を設定',
+          '`/外部アプリ制限 モード(on|off)` 外部アプリの利用制限を切替',
+          '`/対策切替 対象 モード(on|off)` スパム・レイド・画像判定を個別に切替',
+          '`/招待パネル設置 [#チャンネル]` 招待リンク発行パネルを設置',
+          '`/モデレーター役職設定 @ロール` モデレーター役職を設定',
+          '`/解除 @ユーザー` ユーザーのタイムアウトを解除',
+        ].join('\n'),
+      },
+      {
+        name: '🔧 管理・開発者向け',
+        value: [
+          '`/設定状況 表示` [管理者] 全モジュールの設定状況を表示',
+          '`/bot情報 表示` [開発者] 参加サーバー一覧と招待リンクを表示',
+          '`/vc接続時間リセット ユーザー` [開発者] 指定ユーザーのVC接続時間をリセット',
+          '`/vc接続時間全リセット` [開発者] 全ユーザーのVC接続時間をリセット',
+          '`/残高全額リセット ユーザー` [開発者] 指定ユーザーの残高を0にリセット',
+          '`/残高全額全リセット` [開発者] 全ユーザーの残高を0にリセット',
+        ].join('\n'),
       },
     )
     .setTimestamp();
@@ -1444,7 +1477,8 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('コマンド一覧')
-    .setDescription('[管理者・開発者] 残すコマンドの一覧を表示します')
+    .setDescription('[管理者] 全モジュールのコマンド一覧を表示します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addStringOption(opt => opt
       .setName('表示')
       .setDescription('表示方法')
@@ -1456,7 +1490,8 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('設定状況')
-    .setDescription('[開発者専用] サーバー設定状況を表示します')
+    .setDescription('[管理者] 全モジュールのサーバー設定状況を表示します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addStringOption(opt => opt
       .setName('表示')
       .setDescription('表示方法')
@@ -2819,7 +2854,7 @@ client.on('interactionCreate', async interaction => {
 
     if (commandName === 'コマンド一覧') {
       if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
-        await interaction.reply({ content: '❌ このコマンドは管理者または開発者専用です。', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: '❌ このコマンドは管理者専用です。', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -2830,14 +2865,70 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === '設定状況') {
-      if (interaction.user.id !== DEVELOPER_ID) {
-        await interaction.reply({ content: '❌ このコマンドは開発者専用です。', flags: MessageFlags.Ephemeral });
+      if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        await interaction.reply({ content: '❌ このコマンドは管理者専用です。', flags: MessageFlags.Ephemeral });
         return;
       }
 
       const hidden = interaction.options.getString('表示', true) === 'hidden';
-      const embed = buildStatusEmbed(guild);
-      await interaction.reply(hidden ? { embeds: [embed], flags: MessageFlags.Ephemeral } : { embeds: [embed] });
+      if (hidden) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.deferReply();
+      }
+
+      const none = '未設定';
+      const ch = (id) => (id ? `<#${id}>` : none);
+      const settings = db.getSettings(guild.id);
+      const unit = settings.currency_unit || 'コイン';
+
+      // 経済設定 embed
+      const economyEmbed = buildStatusEmbed(guild);
+      economyEmbed.setTitle('💰 経済設定状況');
+
+      // コミュニティ設定 embed
+      const vcTransferCount = db.getVcTransferCount(guild.id);
+      const ticketPanelCount = db.getTicketPanelCount(guild.id);
+      const rrMessageCount = db.getReactionRoleMessageCount(guild.id);
+      const messageLinkPreview = settings.message_link_preview_enabled !== 0 ? 'オン' : 'オフ';
+      const communityEmbed = new EmbedBuilder()
+        .setTitle('🎙 コミュニティ設定状況')
+        .setColor(0x57f287)
+        .setDescription(`サーバー: **${guild.name}**`)
+        .addFields(
+          { name: '📥 入室ログ', value: ch(settings.join_log_channel_id), inline: true },
+          { name: '📤 退出ログ', value: ch(settings.leave_log_channel_id), inline: true },
+          { name: '💬 メッセージリンク自動表示', value: messageLinkPreview, inline: true },
+          { name: '🔊 VC転送設定数', value: `${vcTransferCount}件`, inline: true },
+          { name: '🎫 チケットパネル数', value: `${ticketPanelCount}件`, inline: true },
+          { name: '🎭 RRメッセージ数', value: `${rrMessageCount}件`, inline: true },
+        )
+        .setTimestamp();
+
+      // セキュリティ設定 embed
+      const secConfig = db.getAppStateJson('security', 'config') || {};
+      const secEmbed = new EmbedBuilder()
+        .setTitle('🛡 セキュリティ設定状況')
+        .setColor(0xed4245)
+        .setDescription(`サーバー: **${guild.name}**`)
+        .addFields(
+          { name: 'スパム判定', value: secConfig.spamProtectionEnabled !== false ? '有効' : '無効', inline: true },
+          { name: 'レイド判定', value: secConfig.raidProtectionEnabled !== false ? '有効' : '無効', inline: true },
+          { name: '画像スパム判定', value: secConfig.imageSpamDetectionEnabled !== false ? '有効' : '無効', inline: true },
+          { name: 'スパムしきい値', value: String(secConfig.spamThreshold ?? 6), inline: true },
+          { name: 'スパム窓', value: `${secConfig.spamWindowMs ?? 8000}ms`, inline: true },
+          { name: 'レイドしきい値', value: String(secConfig.raidJoinThreshold ?? 8), inline: true },
+          { name: 'レイド窓', value: `${secConfig.raidWindowMs ?? 20000}ms`, inline: true },
+          { name: 'タイムアウト時間', value: `${secConfig.timeoutDurationMinutes ?? 10}分`, inline: true },
+          { name: '外部アプリ制限', value: secConfig.blockExternalApps ? '有効' : '無効', inline: true },
+          { name: 'モデレーションログ', value: secConfig.moderationLogChannelId ? `<#${secConfig.moderationLogChannelId}>` : none, inline: true },
+          { name: '招待ログ', value: secConfig.inviteLogChannelId ? `<#${secConfig.inviteLogChannelId}>` : none, inline: true },
+          { name: '招待パネル設置先', value: secConfig.invitePanelChannelId ? `<#${secConfig.invitePanelChannelId}>` : none, inline: true },
+          { name: 'モデレーター役職', value: secConfig.modRoleId ? `<@&${secConfig.modRoleId}>` : none, inline: true },
+        )
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [communityEmbed, economyEmbed, secEmbed] });
       return;
     }
 

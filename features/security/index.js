@@ -238,24 +238,6 @@ const invitePanelButtonId = 'issue-personal-invite';
 
 const slashCommands = [
   new SlashCommandBuilder()
-    .setName('commands')
-    .setNameLocalization('ja', 'コマンド一覧')
-    .setDescription('使えるコマンド一覧を表示します')
-    .setDescriptionLocalization('ja', '使えるコマンド一覧を表示します')
-    .addStringOption((option) =>
-      option
-        .setName('visibility')
-        .setNameLocalization('ja', '表示範囲')
-        .setDescription('公開するか自分だけにするかを選びます')
-        .setDescriptionLocalization('ja', '公開するか自分だけにするかを選びます')
-        .setRequired(false)
-        .addChoices(
-          { name: '公開', value: 'public' },
-          { name: '自分だけ', value: 'private' },
-        ),
-    )
-    .toJSON(),
-  new SlashCommandBuilder()
     .setName('status')
     .setNameLocalization('ja', '状態')
     .setDescription('現在の対策設定と招待管理状態を表示します')
@@ -370,7 +352,6 @@ const slashCommands = [
 ];
 
 const commandAliases = {
-  commands: ['commands', 'コマンド一覧', 'help', 'ヘルプ'],
   status: ['status', '状態'],
   setmodlog: ['setmodlog', 'モデレーションログ設定'],
   setinvitelog: ['setinvitelog', '招待ログ設定'],
@@ -393,7 +374,6 @@ function getCommandKey(command) {
 }
 
 const commandDescriptions = {
-  commands: '使えるコマンド一覧を表示します。',
   status: '現在の対策設定と招待管理状態を表示します。',
   setmodlog: 'モデレーションログを送るチャンネルを設定します。',
   setinvitelog: '招待ログを送るチャンネルを設定します。',
@@ -406,50 +386,6 @@ const commandDescriptions = {
   setmodrole: 'モデレーター役職を設定します。',
   allow: 'ユーザーのタイムアウトを解除します。',
 };
-
-function buildCommandListEmbed() {
-  return new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle('コマンド一覧')
-    .setDescription('使えるコマンド一覧です。')
-    .addFields(
-      {
-        name: 'General',
-        value: [
-          '/コマンド一覧 コマンド一覧を表示',
-          '/状態 現在の設定状態を表示',
-        ].join('\n'),
-      },
-      {
-        name: 'セキュリティ設定',
-        value: [
-          '/モデレーションログ設定 モデレーションログを設定',
-          '/招待ログ設定 招待ログを設定',
-          '/タイムアウト設定 タイムアウト時間を設定',
-          '/スパム設定 スパム判定を設定',
-          '/レイド設定 レイド判定を設定',
-          '/外部アプリ制限 外部アプリ制限を切替',
-          '/対策切替 スパム・レイド・画像判定を切替',
-          '/解除 タイムアウトを解除',
-        ].join('\n'),
-      },
-      {
-        name: '招待管理',
-        value: [
-          '/招待パネル設置 招待パネルを設置',
-          'パネルの 招待リンクを発行 ボタン 自分専用の招待リンクを DM で受信',
-          '/モデレーター役職設定 モデレーター役職を設定',
-        ].join('\n'),
-      },
-      {
-        name: 'メモ',
-        value: [
-          '/コマンド一覧 は誰でも確認できます。',
-          '設定変更系はモデレーターまたは管理者のみです。',
-        ].join('\n'),
-      },
-    );
-}
 
 function isMod(member) {
   if (!member) return false;
@@ -831,13 +767,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   const commandKey = getCommandKey(interaction.commandName);
-
-  if (commandKey === 'commands') {
-    const visibility = interaction.options.getString('visibility') || 'private';
-    const ephemeral = visibility !== 'public';
-    await interaction.reply({ embeds: [buildCommandListEmbed()], ephemeral });
-    return;
-  }
 
   if (commandKey === 'status') {
     await interaction.reply({ embeds: [buildStatusEmbed(interaction.guildId)], ephemeral: true });
