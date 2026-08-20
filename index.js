@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 process.on('uncaughtException', (err) => {
   process.stdout.write('[FATAL] uncaughtException: ' + err.message + '\n' + err.stack + '\n');
@@ -34,7 +35,29 @@ const {
 } = require('discord.js');
 
 const db = require('./database.js');
-const economyDb = require('../economy/database.js');
+
+let economyDb;
+const economyDbCandidates = [
+  path.resolve(__dirname, '../economy/database.js'),
+  path.resolve(__dirname, '../../features/economy/database.js'),
+  path.resolve(process.cwd(), 'features/economy/database.js'),
+  path.resolve(process.cwd(), 'economy/database.js'),
+];
+
+for (const candidate of economyDbCandidates) {
+  try {
+    economyDb = require(candidate);
+    break;
+  } catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND' || !String(error.message).includes('economy/database.js')) {
+      throw error;
+    }
+  }
+}
+
+if (!economyDb) {
+  throw new Error(`Failed to resolve economy database module. Tried: ${economyDbCandidates.join(', ')}`);
+}
 
 const client = new Client({
   intents: [
