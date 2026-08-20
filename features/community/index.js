@@ -33,7 +33,35 @@ const {
   AttachmentBuilder,
 } = require('discord.js');
 
+const path = require('path');
 const db = require('./database.js');
+
+let economyDb;
+const economyDbCandidates = [
+  path.resolve(__dirname, '../economy/database.js'),
+  path.resolve(__dirname, '../../features/economy/database.js'),
+  path.resolve(process.cwd(), 'features/economy/database.js'),
+  path.resolve(process.cwd(), 'economy/database.js'),
+];
+
+for (const candidate of economyDbCandidates) {
+  try {
+    economyDb = require(candidate);
+    break;
+  } catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND' || !String(error.message).includes('economy/database.js')) {
+      throw error;
+    }
+  }
+}
+
+if (!economyDb) {
+  throw new Error(`Failed to resolve economy database module. Tried: ${economyDbCandidates.join(', ')}`);
+}
+
+if (typeof db?.isMessageLinkPreviewEnabled !== 'function') {
+  throw new Error('[community-db] Missing isMessageLinkPreviewEnabled() in community database module.');
+}
 
 const client = new Client({
   intents: [
@@ -366,6 +394,23 @@ function parseRoleIdList(raw) {
   }
 }
 
+function normalizeSnowflakeId(value) {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  return /^\d{17,20}$/.test(str) ? str : null;
+}
+
+function collectValidRoleIds(guild, ids) {
+  const seen = new Set();
+  return ids
+    .map(normalizeSnowflakeId)
+    .filter((id) => {
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return guild.roles.cache.has(id);
+    });
+}
+
 function collectRoleOptionIds(interaction, baseName, maxCount = 5) {
   const ids = [];
   for (let i = 1; i <= maxCount; i++) {
@@ -438,6 +483,12 @@ const commands = [
     .addRoleOption((opt) => opt.setName('ロール1').setDescription('チケットを閲覧できるロール1').setRequired(false))
     .addRoleOption((opt) => opt.setName('ロール2').setDescription('チケットを閲覧できるロール2').setRequired(false))
     .addRoleOption((opt) => opt.setName('ロール3').setDescription('チケットを閲覧できるロール3').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('チケットパネル削除')
+    .setDescription('[管理者] チケットパネルを削除します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addIntegerOption((opt) => opt.setName('パネルid').setDescription('削除するパネルID').setRequired(true).setMinValue(1)),
 
   new SlashCommandBuilder()
     .setName('リアクションロールメッセージ')
@@ -573,8 +624,8 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       if (config) {
         const number = db.getNextChildVcNumber(guildId, newState.channelId);
         const parentChannel = newState.guild.channels.cache.get(newState.channelId);
-        const visibleRoleIds = parseRoleIdList(config.visible_role_ids);
-        const connectRoleIds = parseRoleIdList(config.connect_role_ids);
+        const visibleRoleIds = collectValidRoleIds(newState.guild, parseRoleIdList(config.visible_role_ids));
+        const connectRoleIds = collectValidRoleIds(newState.guild, parseRoleIdList(config.connect_role_ids));
         const permissionOverwrites = [];
 
         if (visibleRoleIds.length > 0) {
@@ -953,58 +1004,65 @@ client.on('interactionCreate', async (interaction) => {
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-      const roles = [panel.role1_id, panel.role2_id, panel.role3_id].filter(Boolean);
-      const permissionOverwrites = [
-        { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-        { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-      ];
+      let ticketChannel = null;
+      try {
+        const roles = collectValidRoleIds(interaction.guild, [panel.role1_id, panel.role2_id, panel.role3_id]);
+        const permissionOverwrites = [
+          { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+          { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+        ];
 
-      for (const roleId of roles) {
-        permissionOverwrites.push({ id: roleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+        for (const roleId of roles) {
+          permissionOverwrites.push({ id: roleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+        }
+
+        ticketChannel = await interaction.guild.channels.create({
+          name: 'ticket-temp',
+          type: ChannelType.GuildText,
+          parent: panel.category_id,
+          permissionOverwrites,
+        });
+
+        const ticketId = db.createTicket(guildId, ticketChannel.id, interaction.user.id, panelId);
+        const rawDisplayName = interaction.member?.displayName || interaction.user.username;
+        const safeDisplayName = rawDisplayName
+          .toLowerCase()
+          .replace(/\s+/g, '-')
+          .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\-]/g, '')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          .slice(0, 70) || 'user';
+        await ticketChannel.setName(`ticket-${ticketId}-${safeDisplayName}様`);
+
+        const mentionParts = roles.map((r) => `<@&${r}>`);
+        mentionParts.push(`<@${interaction.user.id}>`);
+
+        const autoEmbed = new EmbedBuilder()
+          .setTitle('📩 ' + panel.title)
+          .setDescription(parseNewlines(panel.auto_message))
+          .setColor(0x5865f2)
+          .setTimestamp();
+
+        const closeRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`ticket_close_${ticketChannel.id}`)
+            .setLabel('🔒 チケットを閉じる')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+        await ticketChannel.send({
+          content: mentionParts.join(' '),
+          embeds: [autoEmbed],
+          components: [closeRow],
+        });
+
+        await interaction.editReply({ content: `✅ チケットが作成されました: <#${ticketChannel.id}>` });
+      } catch (error) {
+        if (ticketChannel) await ticketChannel.delete().catch(() => {});
+        console.error('チケット作成エラー:', error);
+        await interaction.editReply({ content: `❌ チケットを作成できませんでした。Botの権限とカテゴリ設定を確認してください。\n詳細: ${error.message}` });
       }
-
-      const ticketChannel = await interaction.guild.channels.create({
-        name: 'ticket-temp',
-        type: ChannelType.GuildText,
-        parent: panel.category_id,
-        permissionOverwrites,
-      });
-
-      const ticketId = db.createTicket(guildId, ticketChannel.id, interaction.user.id, panelId);
-      const rawDisplayName = interaction.member?.displayName || interaction.user.username;
-      const safeDisplayName = rawDisplayName
-        .toLowerCase()
-        .replace(/\s+/g, '-')
-        .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff\-]/g, '')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 70) || 'user';
-      await ticketChannel.setName(`ticket-${ticketId}-${safeDisplayName}様`);
-
-      const mentionParts = roles.map((r) => `<@&${r}>`);
-      mentionParts.push(`<@${interaction.user.id}>`);
-
-      const autoEmbed = new EmbedBuilder()
-        .setTitle('📩 ' + panel.title)
-        .setDescription(parseNewlines(panel.auto_message))
-        .setColor(0x5865f2)
-        .setTimestamp();
-
-      const closeRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`ticket_close_${ticketChannel.id}`)
-          .setLabel('🔒 チケットを閉じる')
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      await ticketChannel.send({
-        content: mentionParts.join(' '),
-        embeds: [autoEmbed],
-        components: [closeRow],
-      });
-
-      await interaction.editReply({ content: `✅ チケットが作成されました: <#${ticketChannel.id}>` });
       return;
     }
 
@@ -1186,10 +1244,6 @@ client.on('interactionCreate', async (interaction) => {
 
     const { commandName, guild, member } = interaction;
 
-    if (SHARED_APP_MODE && COMMUNITY_BLOCKED_COMMANDS_IN_SHARED_MODE.has(commandName)) {
-      return;
-    }
-
     if (commandName === 'vc転送') {
       const parentVc = interaction.options.getChannel('親vc');
       const baseName = interaction.options.getString('vcベース名');
@@ -1292,13 +1346,49 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    if (commandName === 'チケットパネル削除') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+      const panelId = interaction.options.getInteger('パネルid', true);
+      const panel = db.getTicketPanel(panelId);
+      if (!panel || panel.guild_id !== guild.id) {
+        await interaction.editReply({ content: `❌ チケットパネル ${panelId} は存在しません。` });
+        return;
+      }
+
+      let panelMessageDeleted = false;
+      if (panel.channel_id && panel.message_id) {
+        const panelChannel = guild.channels.cache.get(panel.channel_id);
+        if (isTextBasedChannel(panelChannel)) {
+          const panelMessage = await panelChannel.messages.fetch(panel.message_id).catch(() => null);
+          if (panelMessage) {
+            await panelMessage.delete().catch(() => null);
+            panelMessageDeleted = true;
+          }
+        }
+      }
+
+      db.deleteTicketPanel(guild.id, panelId);
+      await interaction.editReply({
+        content: [
+          '✅ チケットパネルを削除しました。',
+          `パネルID: ${panelId}`,
+          `パネルメッセージ削除: ${panelMessageDeleted ? '成功' : '未削除（既に削除済み/取得不可）'}`,
+          '既存のチケットチャンネルはそのままです。',
+        ].join('\n'),
+      });
+      return;
+    }
+
     if (commandName === 'リアクションロールメッセージ') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const msgText = interaction.options.getString('メッセージ');
       const reactionsRaw = interaction.options.getString('リアクション');
       const emojis = reactionsRaw.split(',').map((e) => e.trim()).filter(Boolean);
 
       if (emojis.length === 0) {
-        await interaction.reply({ content: '❌ リアクションを1つ以上指定してください。', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: '❌ リアクションを1つ以上指定してください。' });
         return;
       }
 
@@ -1306,8 +1396,8 @@ client.on('interactionCreate', async (interaction) => {
         .setDescription(parseNewlines(msgText))
         .setColor(0x5865f2);
 
-      await interaction.reply({ content: '✅ リアクションロールメッセージを送信しました。', flags: MessageFlags.Ephemeral });
       const sentMsg = await interaction.channel.send({ embeds: [msgEmbed] });
+      await interaction.editReply({ content: '✅ リアクションロールメッセージを送信しました。' });
 
       db.createReactionRoleMessage(guild.id, interaction.channel.id, sentMsg.id, msgText.slice(0, 100));
 
@@ -1318,11 +1408,12 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (commandName === 'リアクションロールセット') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const messages = db.getAllReactionRoleMessages(guild.id);
       if (messages.length === 0) {
-        await interaction.reply({
+        await interaction.editReply({
           content: '❌ このサーバーにリアクションロールメッセージがありません。\n先に /リアクションロールメッセージ を実行してください。',
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1338,10 +1429,9 @@ client.on('interactionCreate', async (interaction) => {
         .setPlaceholder('設定するメッセージを選択してください')
         .addOptions(options);
 
-      await interaction.reply({
+      await interaction.editReply({
         content: '🎭 リアクションロールを設定するメッセージを選択してください:',
         components: [new ActionRowBuilder().addComponents(selectMenu)],
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -1431,16 +1521,18 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (commandName === '入室ログ') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const logChannel = interaction.options.getChannel('チャンネル');
       db.setJoinLogChannel(guild.id, logChannel.id);
-      await interaction.reply({ content: `✅ 入室ログチャンネルを <#${logChannel.id}> に設定しました。`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `✅ 入室ログチャンネルを <#${logChannel.id}> に設定しました。` });
       return;
     }
 
     if (commandName === '退出ログ') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const logChannel = interaction.options.getChannel('チャンネル');
       db.setLeaveLogChannel(guild.id, logChannel.id);
-      await interaction.reply({ content: `✅ 退出ログチャンネルを <#${logChannel.id}> に設定しました。`, flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: `✅ 退出ログチャンネルを <#${logChannel.id}> に設定しました。` });
       return;
     }
 
@@ -1452,45 +1544,55 @@ client.on('interactionCreate', async (interaction) => {
       }
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      await renderStatusBoard(guild, { createIfMissing: true, syncMembers: true });
-      await interaction.editReply({ content: '✅ status表示を作成/更新しました。' });
+      try {
+        await renderStatusBoard(guild, { createIfMissing: true, syncMembers: true });
+        await interaction.editReply({ content: '✅ status表示を作成/更新しました。' });
+      } catch (error) {
+        console.error('statusコマンド失敗:', error);
+        try {
+          await interaction.editReply({ content: '❌ status表示の更新中にエラーが発生しました。' });
+        } catch (_) {}
+      }
       return;
     }
 
     if (commandName === 'bot送信') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const rawLink = interaction.options.getString('メッセージリンク');
       const linkData = extractMessageLink(rawLink);
       if (!linkData) {
-        await interaction.reply({ content: '❌ 有効なDiscordメッセージリンクを指定してください。', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: '❌ 有効なDiscordメッセージリンクを指定してください。' });
         return;
       }
 
       const resolved = await resolveLinkedMessage(linkData);
       if (!resolved) {
-        await interaction.reply({ content: '❌ リンク先メッセージを取得できませんでした。閲覧権限やリンクを確認してください。', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: '❌ リンク先メッセージを取得できませんでした。閲覧権限やリンクを確認してください。' });
         return;
       }
 
       const text = buildLinkedMessageText(resolved.message);
       if (!text) {
-        await interaction.reply({ content: '❌ リンク先メッセージに送信できる本文がありません。', flags: MessageFlags.Ephemeral });
+        await interaction.editReply({ content: '❌ リンク先メッセージに送信できる本文がありません。' });
         return;
       }
 
       await interaction.channel.send({ content: text });
-      await interaction.reply({ content: '✅ リンク先メッセージの本文を送信しました。', flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: '✅ リンク先メッセージの本文を送信しました。' });
       return;
     }
 
     if (commandName === 'メッセージリンク表示') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const state = interaction.options.getString('状態');
       const enabled = state === 'on';
 
       db.setMessageLinkPreviewEnabled(guild.id, enabled);
 
-      await interaction.reply({
+      await interaction.editReply({
         content: `✅ メッセージリンク自動表示を **${enabled ? 'オン' : 'オフ'}** にしました。`,
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -1501,6 +1603,8 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
       const embed = new EmbedBuilder()
         .setTitle('📋 コマンド一覧')
         .setColor(0x5865f2)
@@ -1508,7 +1612,7 @@ client.on('interactionCreate', async (interaction) => {
         .addFields(
           { name: '🔊 VC転送', value: '/vc転送 親VC VCベース名 作成先カテゴリ [権限ロール]' },
           { name: '🎛 VC設定パネル', value: '/vcパネル — 公開パネルを現在のチャンネルに設置します' },
-          { name: '🎫 チケット', value: '/チケットパネル タイトル 説明 ラベル 作成先カテゴリ 保存先チャンネル 自動送信メッセージ [ロール1-3]' },
+          { name: '🎫 チケット', value: '/チケットパネル タイトル 説明 ラベル 作成先カテゴリ 保存先チャンネル 自動送信メッセージ [ロール1-3]\n/チケットパネル削除 パネルID' },
           { name: '🎭 リアクションロール', value: '/リアクションロールメッセージ メッセージ リアクション\n/リアクションロールセット' },
           { name: '📌 固定メッセージ', value: '/固定メッセージ タイトル 説明' },
           { name: '💣 チャンネルリセット', value: '/nuke モード(recreate|purge)' },
@@ -1520,13 +1624,13 @@ client.on('interactionCreate', async (interaction) => {
         )
         .setTimestamp();
 
-      await interaction.reply({ embeds: [embed] });
+      await interaction.editReply({ embeds: [embed] });
       return;
     }
 
     if (commandName === '設定状況') {
-      if (interaction.user.id !== DEVELOPER_ID) {
-        await interaction.reply({ content: '❌ このコマンドは開発者専用です。', flags: MessageFlags.Ephemeral });
+      if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        await interaction.reply({ content: '❌ このコマンドは管理者または開発者専用です。', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -1538,9 +1642,18 @@ client.on('interactionCreate', async (interaction) => {
       const vcTransfers = db.getAllVcTransfers(guild.id);
       const ticketPanels = db.getAllTicketPanels(guild.id);
       const rrMessages = db.getAllReactionRoleMessages(guild.id);
+      const vendingPanels = economyDb.getVendingPanels(guild.id);
+      const vcVendingPanels = economyDb.getVcVendingPanels(guild.id);
+      const gachaPanels = economyDb.getGachaPanels(guild.id);
+      const boxGachaSettings = economyDb.getBoxGachaSettings(guild.id);
 
       const none = '未設定';
       const ch = (id) => (id ? `<#${id}>` : none);
+      const addFieldEmbeds = (title, color, fields) => {
+        for (let index = 0; index < fields.length; index += 25) {
+          embeds.push(new EmbedBuilder().setTitle(title).setColor(color).addFields(fields.slice(index, index + 25)));
+        }
+      };
 
       const embeds = [];
 
@@ -1561,7 +1674,7 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       if (vcTransfers.length > 0) {
-        const fields = vcTransfers.slice(0, 25).map((v) => ({
+        const fields = vcTransfers.map((v) => ({
           name: `親VC: <#${v.parent_vc_id}>`,
           value: [
             `ベース名: **${v.base_name}**`,
@@ -1578,24 +1691,24 @@ client.on('interactionCreate', async (interaction) => {
           inline: true,
         }));
 
-        embeds.push(new EmbedBuilder().setTitle('🔊 VC転送設定').setColor(0x57f287).addFields(fields));
+        addFieldEmbeds('🔊 VC転送設定', 0x57f287, fields);
       }
 
       if (ticketPanels.length > 0) {
-        const fields = ticketPanels.slice(0, 25).map((p) => {
+        const fields = ticketPanels.map((p) => {
           const roles = [p.role1_id, p.role2_id, p.role3_id].filter(Boolean).map((r) => `<@&${r}>`).join(', ') || none;
           return {
             name: `パネル: ${p.title}`,
-            value: `カテゴリID: ${p.category_id}\nログ先: ${ch(p.log_channel_id)}\n閲覧ロール: ${roles}`,
+            value: `カテゴリ: ${ch(p.category_id)}\nログ先: ${ch(p.log_channel_id)}\nサポートロール: ${roles}`,
             inline: true,
           };
         });
 
-        embeds.push(new EmbedBuilder().setTitle('🎫 チケットパネル設定').setColor(0xfee75c).addFields(fields));
+        addFieldEmbeds('🎫 チケットパネル設定', 0xfee75c, fields);
       }
 
       if (rrMessages.length > 0) {
-        const fields = rrMessages.slice(0, 25).map((m) => {
+        const fields = rrMessages.map((m) => {
           const mappings = db.getReactionRoleMappingsForMessage(m.message_id);
           const mapStr = mappings.length > 0
             ? mappings.map((mp) => `${mp.emoji} → ${mp.role_id ? `<@&${mp.role_id}>` : '未設定'}`).join('\n')
@@ -1604,7 +1717,47 @@ client.on('interactionCreate', async (interaction) => {
           return { name: `メッセージ: ${m.id}`, value: `[リンク](${link})\n${mapStr}`, inline: true };
         });
 
-        embeds.push(new EmbedBuilder().setTitle('🎭 リアクションロール設定').setColor(0xeb459e).addFields(fields));
+        addFieldEmbeds('🎭 リアクションロール設定', 0xeb459e, fields);
+      }
+
+      const panelFields = (panels, label) => panels.map((panel) => ({
+        name: `${label}: ${panel.panel_key}`,
+        value: [
+          `設置先: ${ch(panel.channel_id)}`,
+          `メッセージID: ${panel.message_id || none}`,
+          `ログ先: ${ch(panel.log_channel_id)}`,
+          `タイトル: ${panel.title || none}`,
+        ].join('\n'),
+        inline: true,
+      }));
+
+      if (vendingPanels.length > 0) {
+        addFieldEmbeds('🛒 自販機パネル設定', 0xf1c40f, panelFields(vendingPanels, '自販機'));
+      }
+
+      if (vcVendingPanels.length > 0) {
+        addFieldEmbeds('🛒 VC自販機パネル設定', 0xf1c40f, panelFields(vcVendingPanels, 'VC自販機'));
+      }
+
+      const gachaFields = gachaPanels.map((panel) => ({
+        name: `旧ガチャ: ${panel.panel_key}`,
+        value: `設置先: ${ch(panel.channel_id)}\nメッセージID: ${panel.message_id || none}\nタイトル: ${panel.title || none}`,
+        inline: true,
+      }));
+      const boxGachaFields = boxGachaSettings.map((gacha) => ({
+        name: `ガチャ: ${gacha.gacha_key}`,
+        value: [
+          `ガチャ名: ${gacha.name || none}`,
+          `設置先: ${ch(gacha.channel_id)}`,
+          `メッセージID: ${gacha.message_id || none}`,
+          `ログ先: ${ch(gacha.log_channel_id)}`,
+          `価格: 1回 ${gacha.single_price ?? 0} / 10連 ${gacha.ten_price ?? 0}`,
+        ].join('\n'),
+        inline: true,
+      }));
+
+      if (gachaFields.length > 0 || boxGachaFields.length > 0) {
+        addFieldEmbeds('🎰 ガチャパネル設定', 0x9b59b6, [...gachaFields, ...boxGachaFields]);
       }
 
       await interaction.editReply({ embeds });

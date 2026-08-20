@@ -52,6 +52,7 @@ const {
 } = require('discord.js');
 
 const db = require('./database.js');
+const communityDb = require('../community/database.js');
 
 function requireGachaModule(moduleName) {
   try {
@@ -150,6 +151,7 @@ function buildCommandListEmbed() {
           '`/vc転送 親vc vcベース名 作成先カテゴリ [ロール...]` [管理者] 親VC参加者を子VCに自動転送',
           '`/vcパネル` [管理者] 公開のVC設定パネルを設置',
           '`/チケットパネル タイトル 説明 ラベル 作成先カテゴリ 保存先チャンネル 自動送信メッセージ [ロール1-3]` [管理者] チケットパネルを設置',
+          '`/チケットパネル削除 パネルID` [管理者] チケットパネルを削除',
           '`/リアクションロールメッセージ メッセージ リアクション` [管理者] リアクションロール用メッセージを送信',
           '`/リアクションロールセット` [管理者] リアクションロールのロールを設定',
           '`/固定メッセージ タイトル 説明` [管理者] チャンネルに常時最新で表示されるEmbedを設置',
@@ -177,13 +179,14 @@ function buildCommandListEmbed() {
         name: '🛒 自販機',
         value: [
           '`/自販機パネル設置 パネルID #チャンネル タイトル 説明` [管理者] 購入ボタン付き自販機パネルを設置',
+          '`/自販機パネル削除 パネルID` [管理者] 自販機パネルを削除',
           '`/自販機商品設定 設定 パネルID スロット 商品名 ロール 値段 時間(分)` [管理者] 商品を設定/更新',
           '`/自販機商品設定 削除 パネルID スロット` [管理者] 商品を削除',
           '`/自販機商品設定 一覧 パネルID [表示]` 商品一覧を表示',
           '`/自販機ログチャンネル パネルID #チャンネル` [管理者] 購入ログ送信先を設定',
           '`/vc自販機パネル設置 パネルID #チャンネル タイトル 説明` [管理者] VC公開/非公開の購入パネルを設置',
           '`/vc自販機パネル削除 パネルID` [管理者] VC自販機パネルを削除',
-          '`/vc自販機商品設定 設定 パネルID スロット 商品名 対象VC 公開設定 値段 時間(分)` [管理者] 商品を設定/更新',
+          '`/vc自販機商品設定 設定 パネルID スロット 商品名 カテゴリ 公開ロール 参加人数 公開設定 値段 延長料金 延長時間 時間(分)` [管理者] 商品を設定/更新',
           '`/vc自販機商品設定 削除 パネルID スロット` [管理者] 商品を削除',
           '`/vc自販機商品設定 一覧 パネルID [表示]` 商品一覧を表示',
           '`/vc自販機ログチャンネル パネルID #チャンネル` [管理者] 購入ログ送信先を設定',
@@ -227,6 +230,7 @@ function buildCommandListEmbed() {
           '`/商品削除` [管理者] 商品を削除',
           '`/商品一覧` 商品一覧を表示',
           '`/ガチャ設置` [管理者] 4ボタン付きガチャパネルを設置',
+          '`/ガチャパネル削除 ガチャID` [管理者] ガチャパネルを削除',
           '`/ガチャ情報` ガチャ設定を表示',
           '`/提供割合` 残数から割合を表示',
           '`/ガチャログ #チャンネル` [管理者] 抽選ログ送信先を設定',
@@ -247,7 +251,6 @@ function buildCommandListEmbed() {
       {
         name: '🛡 セキュリティ',
         value: [
-          '`/状態` 現在の対策設定と招待管理状態を表示',
           '`/モデレーションログ設定 #チャンネル` モデレーションログチャンネルを設定',
           '`/招待ログ設定 #チャンネル` 招待ログチャンネルを設定',
           '`/タイムアウト設定 分` タイムアウト時間を設定',
@@ -737,14 +740,15 @@ function getVcVisibilityLabel(mode) {
   return mode === 'public' ? '公開' : '非公開';
 }
 
-function buildPrivateVcAccessPanelEmbed(ownerId, expiresAt) {
+function buildPrivateVcAccessPanelEmbed(ownerId, expiresAt, extensionPrice, extensionDuration, unit) {
   return new EmbedBuilder()
-    .setTitle('🔒 シークレットvcアクセス権限')
+    .setTitle('🎙️ 一時VC管理パネル')
     .setColor(0x3ba55d)
     .setDescription([
       `オーナー: <@${ownerId}>`,
-      'このVCに参加させたいユーザーを追加できます。',
-      `期限: ${formatDateTime(expiresAt)}`,
+      `VC削除時間: ${formatDateTime(expiresAt)}`,
+      `延長料金: ${extensionPrice.toLocaleString()} ${unit}（+${extensionDuration}分）`,
+      '公開ロールのメンバーはこのVCを閲覧・接続できます。',
     ].join('\n'))
     .setTimestamp();
 }
@@ -752,6 +756,10 @@ function buildPrivateVcAccessPanelEmbed(ownerId, expiresAt) {
 function buildPrivateVcAccessPanelComponents(voiceChannelId, ownerId) {
   return [
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`vc_room_extend:${voiceChannelId}:${ownerId}`)
+        .setLabel('時間延長')
+        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`vc_room_add:${voiceChannelId}:${ownerId}`)
         .setLabel('メンバー追加')
@@ -805,8 +813,8 @@ async function applyVoiceChannelVisibility(channel, mode) {
   });
 }
 
-function buildPrivateRoomPermissionOverwrites(guild, ownerId) {
-  return [
+function buildPrivateRoomPermissionOverwrites(guild, ownerId, visibilityRoleId) {
+  const overwrites = [
     {
       id: guild.roles.everyone.id,
       deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.SendMessages],
@@ -823,6 +831,20 @@ function buildPrivateRoomPermissionOverwrites(guild, ownerId) {
       ],
     },
   ];
+  if (visibilityRoleId) {
+    overwrites.push({
+      id: visibilityRoleId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.Connect,
+        PermissionFlagsBits.Speak,
+        PermissionFlagsBits.Stream,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+      ],
+    });
+  }
+  return overwrites;
 }
 
 async function sendPrivateRoomNotice(guild, voiceChannelId, content, embeds = [], components = []) {
@@ -833,11 +855,11 @@ async function sendPrivateRoomNotice(guild, voiceChannelId, content, embeds = []
   await textChannel.send({ content, embeds, components }).catch(() => null);
 }
 
-async function createPrivateRoomFromTemplate(guild, ownerMember, templateVoiceChannel, label, expiresAt) {
+async function createPrivateRoomFromTemplate(guild, ownerMember, category, label, expiresAt, visibilityRoleId, userLimit, extensionPrice, unit) {
   const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
   const vcName = `${ownerMember.displayName}様`.slice(0, 90);
   const chatName = `${ownerMember.displayName}様-chat`.slice(0, 100);
-  const overwrites = buildPrivateRoomPermissionOverwrites(guild, ownerMember.id);
+  const overwrites = buildPrivateRoomPermissionOverwrites(guild, ownerMember.id, visibilityRoleId);
 
   if (me) {
     overwrites.push({
@@ -855,7 +877,8 @@ async function createPrivateRoomFromTemplate(guild, ownerMember, templateVoiceCh
   const privateChannel = await guild.channels.create({
     name: vcName,
     type: ChannelType.GuildVoice,
-    parent: templateVoiceChannel.parentId || null,
+    parent: category.id,
+    userLimit,
     permissionOverwrites: overwrites,
     reason: `VC自販機購入: ${label} (${ownerMember.id})`,
   });
@@ -865,7 +888,7 @@ async function createPrivateRoomFromTemplate(guild, ownerMember, templateVoiceCh
     privateTextChannel = await guild.channels.create({
       name: chatName,
       type: ChannelType.GuildText,
-      parent: templateVoiceChannel.parentId || null,
+      parent: category.id,
       permissionOverwrites: overwrites,
       reason: `VC自販機購入チャット: ${label} (${ownerMember.id})`,
     });
@@ -875,7 +898,7 @@ async function createPrivateRoomFromTemplate(guild, ownerMember, templateVoiceCh
   }
 
   await privateTextChannel.send({
-    embeds: [buildPrivateVcAccessPanelEmbed(ownerMember.id, expiresAt)],
+    embeds: [buildPrivateVcAccessPanelEmbed(ownerMember.id, expiresAt, extensionPrice, extensionDuration, unit)],
     components: buildPrivateVcAccessPanelComponents(privateChannel.id, ownerMember.id),
   }).catch(() => null);
 
@@ -891,9 +914,11 @@ function buildVcVendingProductsText(guild, panelKey) {
 
   return products.map(p => [
     `**${p.slot}. ${p.label}**`,
-    `対象VC: <#${p.voice_channel_id}>`,
+    `作成先: <#${p.category_id || p.voice_channel_id}> / 公開ロール: <@&${p.visibility_role_id}>`,
+    `参加人数: ${p.user_limit > 0 ? `${p.user_limit}人` : '無制限'}`,
     `設定: ${getVcVisibilityLabel(p.visibility_mode)}`,
     `値段: ${p.price.toLocaleString()} ${unit}`,
+    `延長: ${p.extension_price.toLocaleString()} ${unit} / ${p.extension_duration_minutes}分`,
     `時間: ${p.duration_minutes}分`,
   ].join(' / ')).join('\n');
 }
@@ -1182,6 +1207,12 @@ const commands = [
     .addStringOption(opt => opt.setName('説明').setDescription('パネル説明').setRequired(true).setMaxLength(1000)),
 
   new SlashCommandBuilder()
+    .setName('自販機パネル削除')
+    .setDescription('[管理者] 自販機パネルを削除します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(opt => opt.setName('パネルid').setDescription('削除するパネルID').setRequired(true).setMaxLength(20)),
+
+  new SlashCommandBuilder()
     .setName('自販機商品設定')
     .setDescription('[管理者] 自販機の商品を設定します')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -1246,7 +1277,9 @@ const commands = [
       .addStringOption(opt => opt.setName('パネルid').setDescription('対象パネルID').setRequired(true).setMaxLength(20))
       .addIntegerOption(opt => opt.setName('スロット').setDescription('ボタンスロット(1-5)').setRequired(true).setMinValue(1).setMaxValue(5))
       .addStringOption(opt => opt.setName('商品名').setDescription('表示する商品名').setRequired(true).setMaxLength(80))
-      .addChannelOption(opt => opt.setName('対象vc').setDescription('設定対象のVC').setRequired(true).addChannelTypes(ChannelType.GuildVoice))
+      .addChannelOption(opt => opt.setName('カテゴリ').setDescription('一時VCを作成するカテゴリ').setRequired(true).addChannelTypes(ChannelType.GuildCategory))
+      .addRoleOption(opt => opt.setName('公開ロール').setDescription('作成されたVCを見えるようにするロール').setRequired(true))
+      .addIntegerOption(opt => opt.setName('参加人数').setDescription('VCの参加人数上限（0は無制限）').setRequired(true).setMinValue(0).setMaxValue(99))
       .addStringOption(opt => opt
         .setName('公開設定')
         .setDescription('適用する公開設定')
@@ -1256,6 +1289,8 @@ const commands = [
           { name: '非公開', value: 'private' },
         ))
       .addIntegerOption(opt => opt.setName('値段').setDescription('購入価格').setRequired(true).setMinValue(1))
+      .addIntegerOption(opt => opt.setName('延長料金').setDescription('チャットの延長ボタンで使う料金').setRequired(true).setMinValue(1))
+      .addIntegerOption(opt => opt.setName('延長時間').setDescription('チャットの延長ボタンで追加する時間（分）').setRequired(true).setMinValue(1))
       .addIntegerOption(opt => opt.setName('時間').setDescription('有効時間（分）').setRequired(true).setMinValue(1))
     )
     .addSubcommand(sub => sub
@@ -1781,9 +1816,10 @@ client.on('interactionCreate', async interaction => {
         return;
       }
 
-      const voiceChannel = interaction.guild.channels.cache.get(product.voice_channel_id);
-      if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
-        await interaction.reply({ content: '❌ 対象VCが存在しないため購入できません。', flags: MessageFlags.Ephemeral });
+      const category = interaction.guild.channels.cache.get(product.category_id || product.voice_channel_id);
+      const visibilityRole = interaction.guild.roles.cache.get(product.visibility_role_id);
+      if (!category || category.type !== ChannelType.GuildCategory || !visibilityRole) {
+        await interaction.reply({ content: '❌ 商品のカテゴリまたは公開ロールが存在しないため購入できません。', flags: MessageFlags.Ephemeral });
         return;
       }
 
@@ -1802,23 +1838,29 @@ client.on('interactionCreate', async interaction => {
       let isTemporaryRoom = 0;
       let privateRoom = null;
       try {
-        if (product.visibility_mode === 'private') {
-          const existingPurchase = db.getVcVendingPurchaseByBuyerAndTemplate(interaction.guild.id, member.id, product.voice_channel_id);
-          const isInExistingRoom = existingPurchase && existingPurchase.is_temporary && member.voice.channelId === existingPurchase.voice_channel_id;
+        const existingPurchase = db.getVcVendingPurchaseByBuyerAndTemplate(interaction.guild.id, member.id, product.category_id || product.voice_channel_id);
+        const isInExistingRoom = existingPurchase && existingPurchase.is_temporary && member.voice.channelId === existingPurchase.voice_channel_id;
 
-          if (isInExistingRoom) {
-            effectiveVoiceChannelId = existingPurchase.voice_channel_id;
-            effectiveTextChannelId = existingPurchase.text_channel_id || null;
-            isTemporaryRoom = 1;
-          } else {
-            const expiresAtForRoom = Date.now() + (product.duration_minutes * 60 * 1000);
-            privateRoom = await createPrivateRoomFromTemplate(interaction.guild, member, voiceChannel, product.label, expiresAtForRoom);
-            effectiveVoiceChannelId = privateRoom.voiceChannel.id;
-            effectiveTextChannelId = privateRoom.textChannel.id;
-            isTemporaryRoom = 1;
-          }
+        if (isInExistingRoom) {
+          effectiveVoiceChannelId = existingPurchase.voice_channel_id;
+          effectiveTextChannelId = existingPurchase.text_channel_id || null;
+          isTemporaryRoom = 1;
         } else {
-          await applyVoiceChannelVisibility(voiceChannel, product.visibility_mode);
+          const expiresAtForRoom = Date.now() + (product.duration_minutes * 60 * 1000);
+          privateRoom = await createPrivateRoomFromTemplate(
+            interaction.guild,
+            member,
+            category,
+            product.label,
+            expiresAtForRoom,
+            product.visibility_mode === 'public' ? product.visibility_role_id : null,
+            product.user_limit,
+            product.extension_price,
+            getUnit(interaction.guild.id),
+          );
+          effectiveVoiceChannelId = privateRoom.voiceChannel.id;
+          effectiveTextChannelId = privateRoom.textChannel.id;
+          isTemporaryRoom = 1;
         }
       } catch (_) {
         db.addBalance(member.id, interaction.guild.id, product.price);
@@ -1830,7 +1872,7 @@ client.on('interactionCreate', async interaction => {
       const sameMode = currentPurchase && currentPurchase.mode === product.visibility_mode && Number(currentPurchase.is_temporary) === isTemporaryRoom;
       const baseTime = sameMode ? Math.max(Date.now(), currentPurchase.expires_at) : Date.now();
       const expiresAt = baseTime + (product.duration_minutes * 60 * 1000);
-      db.upsertVcVendingPurchase(interaction.guild.id, effectiveVoiceChannelId, product.visibility_mode, member.id, expiresAt, isTemporaryRoom, product.voice_channel_id, effectiveTextChannelId);
+      db.upsertVcVendingPurchase(interaction.guild.id, effectiveVoiceChannelId, product.visibility_mode, member.id, expiresAt, isTemporaryRoom, product.category_id || product.voice_channel_id, effectiveTextChannelId, product.extension_price, product.duration_minutes, product.extension_duration_minutes);
 
       if (isTemporaryRoom && currentPurchase && sameMode && member.voice.channelId === currentPurchase.voice_channel_id) {
         const extendMessage = `✅ 部屋の利用時間を延長しました。\n延長後の終了時刻: ${formatDateTime(expiresAt)}`;
@@ -1862,6 +1904,53 @@ client.on('interactionCreate', async interaction => {
           unit,
         })],
       });
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('vc_room_extend:')) {
+      const [prefix, voiceChannelId, ownerId] = interaction.customId.split(':');
+      if (prefix !== 'vc_room_extend') return;
+
+      if (interaction.user.id !== ownerId) {
+        await interaction.reply({ content: '❌ この操作はVCオーナーのみ実行できます。', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const purchase = db.getVcVendingPurchase(interaction.guild.id, voiceChannelId);
+      const voiceChannel = interaction.guild.channels.cache.get(voiceChannelId);
+      if (!purchase || !purchase.is_temporary || !voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+        await interaction.reply({ content: '❌ この一時VCはすでに削除されています。', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const extensionPrice = Math.max(1, Number(purchase.extension_price) || 1);
+      const durationMinutes = Math.max(1, Number(purchase.extension_duration_minutes) || 1);
+      const balance = db.getBalance(interaction.user.id, interaction.guild.id);
+      if (balance < extensionPrice) {
+        await interaction.reply({ content: `❌ 残高不足です。延長料金: ${extensionPrice.toLocaleString()} ${getUnit(interaction.guild.id)}`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      db.subtractBalance(interaction.user.id, interaction.guild.id, extensionPrice);
+      const expiresAt = Math.max(Date.now(), Number(purchase.expires_at)) + (durationMinutes * 60 * 1000);
+      if (db.extendVcVendingPurchase(interaction.guild.id, voiceChannelId, expiresAt) === 0) {
+        db.addBalance(interaction.user.id, interaction.guild.id, extensionPrice);
+        await interaction.reply({ content: '❌ VCの期限更新に失敗しました。', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const unit = getUnit(interaction.guild.id);
+      await interaction.reply({
+        content: `✅ VCを${durationMinutes}分延長しました。期限: ${formatDateTime(expiresAt)}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      await sendPrivateRoomNotice(
+        interaction.guild,
+        voiceChannelId,
+        '✅ VCの期限を更新しました。',
+        [buildPrivateVcAccessPanelEmbed(ownerId, expiresAt, extensionPrice, durationMinutes, unit)],
+        buildPrivateVcAccessPanelComponents(voiceChannelId, ownerId),
+      );
       return;
     }
 
@@ -2062,6 +2151,10 @@ client.on('interactionCreate', async interaction => {
 
     const { commandName, guild, member } = interaction;
 
+    if (process.env.ONE_TOKEN_MODE === 'true' && ['status', 'コマンド一覧', '設定状況', 'bot情報'].includes(commandName)) {
+      return;
+    }
+
     if (isGachaCommandName(commandName)) {
       const handled = await handleGachaCommand(interaction, {
         db,
@@ -2170,6 +2263,44 @@ client.on('interactionCreate', async interaction => {
 
       db.upsertVendingPanel(guild.id, panelKey, channel.id, message.id, title, description);
       await interaction.editReply({ content: `✅ 自販機パネルを設置しました。\nパネルID: ${panelKey}\nチャンネル: <#${channel.id}>\nメッセージID: ${message.id}` });
+      return;
+    }
+
+    if (commandName === '自販機パネル削除') {
+      const panelKey = normalizeVendingPanelKey(interaction.options.getString('パネルid', true));
+      if (!isValidVendingPanelKey(panelKey)) {
+        await interaction.reply({ content: '❌ パネルIDは英数字・`_`・`-` のみ、1〜20文字で指定してください。', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const panel = db.getVendingPanel(guild.id, panelKey);
+      if (!panel) {
+        await interaction.reply({ content: `❌ パネル ${panelKey} は存在しません。`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      let panelMessageDeleted = false;
+      if (panel.channel_id && panel.message_id) {
+        const panelChannel = guild.channels.cache.get(panel.channel_id);
+        if (isTextBasedChannel(panelChannel)) {
+          const panelMessage = await panelChannel.messages.fetch(panel.message_id).catch(() => null);
+          if (panelMessage) {
+            await panelMessage.delete().catch(() => null);
+            panelMessageDeleted = true;
+          }
+        }
+      }
+
+      const result = db.deleteVendingPanel(guild.id, panelKey);
+      await interaction.reply({
+        content: [
+          '✅ 自販機パネルを削除しました。',
+          `パネルID: ${panelKey}`,
+          `商品削除数: ${result.productsDeleted}件`,
+          `パネルメッセージ削除: ${panelMessageDeleted ? '成功' : '未削除（既に削除済み/取得不可）'}`,
+        ].join('\n'),
+        flags: MessageFlags.Ephemeral,
+      });
       return;
     }
 
@@ -2315,20 +2446,24 @@ client.on('interactionCreate', async interaction => {
         }
         const slot = interaction.options.getInteger('スロット', true);
         const label = interaction.options.getString('商品名', true);
-        const targetVc = interaction.options.getChannel('対象vc', true);
+        const category = interaction.options.getChannel('カテゴリ', true);
+        const visibilityRole = interaction.options.getRole('公開ロール', true);
+        const userLimit = interaction.options.getInteger('参加人数', true);
         const visibilityMode = interaction.options.getString('公開設定', true);
         const price = interaction.options.getInteger('値段', true);
+        const extensionPrice = interaction.options.getInteger('延長料金', true);
+        const extensionDuration = interaction.options.getInteger('延長時間', true);
         const duration = interaction.options.getInteger('時間', true);
 
-        if (targetVc.type !== ChannelType.GuildVoice) {
-          await interaction.reply({ content: '❌ 対象VCにはボイスチャンネルを指定してください。', flags: MessageFlags.Ephemeral });
+        if (category.type !== ChannelType.GuildCategory) {
+          await interaction.reply({ content: '❌ カテゴリにはボイスチャンネルカテゴリを指定してください。', flags: MessageFlags.Ephemeral });
           return;
         }
 
-        db.setVcVendingProduct(guild.id, panelKey, slot, label, targetVc.id, visibilityMode, price, duration);
+        db.setVcVendingProduct(guild.id, panelKey, slot, label, category.id, visibilityRole.id, userLimit, visibilityMode, price, extensionPrice, duration, extensionDuration);
         await refreshVcVendingPanel(guild, panelKey);
         await interaction.reply({
-          content: `✅ VC自販機商品を設定しました。\nパネルID: ${panelKey}\nスロット: ${slot}\n商品名: ${label}\n対象VC: <#${targetVc.id}>\n設定: ${getVcVisibilityLabel(visibilityMode)}\n値段: ${price.toLocaleString()} ${getUnit(guild.id)}\n時間: ${duration}分`,
+          content: `✅ VC自販機商品を設定しました。\nパネルID: ${panelKey}\nスロット: ${slot}\n商品名: ${label}\n作成先: <#${category.id}>\n公開ロール: <@&${visibilityRole.id}>\n参加人数: ${userLimit > 0 ? `${userLimit}人` : '無制限'}\n設定: ${getVcVisibilityLabel(visibilityMode)}\n値段: ${price.toLocaleString()} ${getUnit(guild.id)}\n延長料金: ${extensionPrice.toLocaleString()} ${getUnit(guild.id)}\n延長時間: ${extensionDuration}分\n時間: ${duration}分`,
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -2928,7 +3063,68 @@ client.on('interactionCreate', async interaction => {
         )
         .setTimestamp();
 
-      await interaction.editReply({ embeds: [communityEmbed, economyEmbed, secEmbed] });
+      const detailEmbeds = [];
+      const addDetailEmbeds = (title, color, fields) => {
+        for (let index = 0; index < fields.length; index += 25) {
+          detailEmbeds.push(new EmbedBuilder().setTitle(title).setColor(color).addFields(fields.slice(index, index + 25)));
+        }
+      };
+      const ticketPanels = communityDb.getAllTicketPanels(guild.id);
+      const ticketFields = ticketPanels.map((panel) => ({
+        name: `チケット: ${panel.title}`,
+        value: [
+          `カテゴリ: ${ch(panel.category_id)}`,
+          `ログ先: ${ch(panel.log_channel_id)}`,
+          `サポートロール: ${[panel.role1_id, panel.role2_id, panel.role3_id].filter(Boolean).map((id) => `<@&${id}>`).join(', ') || none}`,
+        ].join('\n'),
+        inline: true,
+      }));
+      if (ticketFields.length > 0) {
+        addDetailEmbeds('🎫 チケットパネル設定', 0xfee75c, ticketFields);
+      }
+
+      const panelFields = (panels, label) => panels.map((panel) => ({
+        name: `${label}: ${panel.panel_key}`,
+        value: [
+          `設置先: ${ch(panel.channel_id)}`,
+          `メッセージID: ${panel.message_id || none}`,
+          `ログ先: ${ch(panel.log_channel_id)}`,
+          `タイトル: ${panel.title || none}`,
+        ].join('\n'),
+        inline: true,
+      }));
+      const vendingPanels = db.getVendingPanels(guild.id);
+      const vcVendingPanels = db.getVcVendingPanels(guild.id);
+      if (vendingPanels.length > 0) {
+        addDetailEmbeds('🛒 自販機パネル設定', 0xf1c40f, panelFields(vendingPanels, '自販機'));
+      }
+      if (vcVendingPanels.length > 0) {
+        addDetailEmbeds('🛒 VC自販機パネル設定', 0xf1c40f, panelFields(vcVendingPanels, 'VC自販機'));
+      }
+
+      const gachaFields = [
+        ...db.getGachaPanels(guild.id).map((panel) => ({
+          name: `旧ガチャ: ${panel.panel_key}`,
+          value: `設置先: ${ch(panel.channel_id)}\nメッセージID: ${panel.message_id || none}\nタイトル: ${panel.title || none}`,
+          inline: true,
+        })),
+        ...db.getBoxGachaSettings(guild.id).map((gacha) => ({
+          name: `ガチャ: ${gacha.gacha_key}`,
+          value: [
+            `ガチャ名: ${gacha.name || none}`,
+            `設置先: ${ch(gacha.channel_id)}`,
+            `メッセージID: ${gacha.message_id || none}`,
+            `ログ先: ${ch(gacha.log_channel_id)}`,
+            `価格: 1回 ${gacha.single_price ?? 0} / 10連 ${gacha.ten_price ?? 0}`,
+          ].join('\n'),
+          inline: true,
+        })),
+      ];
+      if (gachaFields.length > 0) {
+        addDetailEmbeds('🎰 ガチャパネル設定', 0x9b59b6, gachaFields);
+      }
+
+      await interaction.editReply({ embeds: [communityEmbed, economyEmbed, secEmbed, ...detailEmbeds] });
       return;
     }
 

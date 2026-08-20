@@ -26,6 +26,7 @@ const GACHA_COMMAND_NAMES = new Set([
   '商品削除',
   '商品一覧',
   'ガチャ設置',
+  'ガチャパネル削除',
   'ガチャ情報',
   '提供割合',
   'ガチャログ',
@@ -79,6 +80,12 @@ const gachaCommandBuilders = [
     .addChannelOption(opt => opt.setName('チャンネル').setDescription('設置先テキストチャンネル').setRequired(true).addChannelTypes(ChannelType.GuildText))
     .addStringOption(opt => opt.setName('タイトル').setDescription('パネルタイトル').setRequired(true).setMaxLength(100))
     .addStringOption(opt => opt.setName('説明').setDescription('パネル説明').setRequired(true).setMaxLength(1000)),
+
+  new SlashCommandBuilder()
+    .setName('ガチャパネル削除')
+    .setDescription('[管理者] 箱ガチャパネルを削除します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(opt => opt.setName('ガチャid').setDescription('削除するガチャID').setRequired(true).setMaxLength(20)),
 
   new SlashCommandBuilder()
     .setName('ガチャ情報')
@@ -150,9 +157,10 @@ async function handleGachaCommand(interaction, context) {
   }
 
   if (commandName === 'ガチャ作成') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const gachaKey = normalizePanelKey(interaction.options.getString('ガチャid', true));
     if (!isValidPanelKey(gachaKey)) {
-      await interaction.reply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。', flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。' });
       return true;
     }
 
@@ -160,7 +168,7 @@ async function handleGachaCommand(interaction, context) {
     const singlePrice = interaction.options.getInteger('1回価格', true);
     const tenPrice = interaction.options.getInteger('10連価格', true);
     db.upsertBoxGacha(guild.id, gachaKey, gachaName, singlePrice, tenPrice);
-    await interaction.reply({
+    await interaction.editReply({
       content: [
         '✅ ガチャを保存しました。',
         `ガチャID: ${gachaKey}`,
@@ -168,21 +176,21 @@ async function handleGachaCommand(interaction, context) {
         `1回価格: ${singlePrice.toLocaleString()} ${getUnit(guild.id)}`,
         `10連価格: ${tenPrice.toLocaleString()} ${getUnit(guild.id)}`,
       ].join('\n'),
-      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
 
   if (commandName === '商品追加') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const gachaKey = normalizePanelKey(interaction.options.getString('ガチャid', true));
     if (!isValidPanelKey(gachaKey)) {
-      await interaction.reply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。', flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。' });
       return true;
     }
 
     const gacha = db.getBoxGacha(guild.id, gachaKey);
     if (!gacha) {
-      await interaction.reply({ content: notFoundMessage(gachaKey), flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: notFoundMessage(gachaKey) });
       return true;
     }
 
@@ -193,7 +201,7 @@ async function handleGachaCommand(interaction, context) {
     db.addBoxGachaProduct(guild.id, gachaKey, productName, quantity, rarity);
     await refreshRelatedPanel(guild, gachaKey, context);
 
-    await interaction.reply({
+    await interaction.editReply({
       content: [
         '✅ 商品を追加しました。',
         `ガチャID: ${gachaKey}`,
@@ -201,21 +209,21 @@ async function handleGachaCommand(interaction, context) {
         `数量: ${quantity}`,
         `レアリティ: ${rarity}`,
       ].join('\n'),
-      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
 
   if (commandName === '商品削除') {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const gachaKey = normalizePanelKey(interaction.options.getString('ガチャid', true));
     if (!isValidPanelKey(gachaKey)) {
-      await interaction.reply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。', flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。' });
       return true;
     }
 
     const gacha = db.getBoxGacha(guild.id, gachaKey);
     if (!gacha) {
-      await interaction.reply({ content: notFoundMessage(gachaKey), flags: MessageFlags.Ephemeral });
+      await interaction.editReply({ content: notFoundMessage(gachaKey) });
       return true;
     }
 
@@ -223,11 +231,10 @@ async function handleGachaCommand(interaction, context) {
     const deleted = db.deleteBoxGachaProduct(guild.id, gachaKey, productName);
     await refreshRelatedPanel(guild, gachaKey, context);
 
-    await interaction.reply({
+    await interaction.editReply({
       content: deleted > 0
         ? `✅ ${productName} を削除しました。`
         : `ℹ️ ${productName} は見つかりませんでした。`,
-      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
@@ -290,6 +297,50 @@ async function handleGachaCommand(interaction, context) {
         `チャンネル: <#${channel.id}>`,
         `メッセージID: ${message.id}`,
       ].join('\n'),
+    });
+    return true;
+  }
+
+  if (commandName === 'ガチャパネル削除') {
+    const gachaKey = normalizePanelKey(interaction.options.getString('ガチャid', true));
+    if (!isValidPanelKey(gachaKey)) {
+      await interaction.reply({ content: '❌ ガチャIDは英数字・_・- のみ、1〜20文字で指定してください。', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const gacha = db.getBoxGacha(guild.id, gachaKey);
+    if (!gacha) {
+      await interaction.reply({ content: notFoundMessage(gachaKey), flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const panel = db.getBoxGachaPanel(guild.id, gachaKey);
+    if (!panel) {
+      await interaction.reply({ content: `❌ ガチャ ${gachaKey} のパネルは設置されていません。`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    let panelMessageDeleted = false;
+    if (panel.channel_id && panel.message_id) {
+      const panelChannel = guild.channels.cache.get(panel.channel_id);
+      if (panelChannel?.messages?.fetch) {
+        const panelMessage = await panelChannel.messages.fetch(panel.message_id).catch(() => null);
+        if (panelMessage) {
+          await panelMessage.delete().catch(() => null);
+          panelMessageDeleted = true;
+        }
+      }
+    }
+
+    db.deleteBoxGachaPanel(guild.id, gachaKey);
+    await interaction.reply({
+      content: [
+        '✅ ガチャパネルを削除しました。',
+        `ガチャID: ${gachaKey}`,
+        `パネルメッセージ削除: ${panelMessageDeleted ? '成功' : '未削除（既に削除済み/取得不可）'}`,
+        'ガチャ本体と商品在庫は残っています。',
+      ].join('\n'),
+      flags: MessageFlags.Ephemeral,
     });
     return true;
   }

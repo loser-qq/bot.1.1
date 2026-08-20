@@ -238,12 +238,6 @@ const invitePanelButtonId = 'issue-personal-invite';
 
 const slashCommands = [
   new SlashCommandBuilder()
-    .setName('status')
-    .setNameLocalization('ja', '状態')
-    .setDescription('現在の対策設定と招待管理状態を表示します')
-    .setDescriptionLocalization('ja', '現在の対策設定と招待管理状態を表示します')
-    .toJSON(),
-  new SlashCommandBuilder()
     .setName('setmodlog')
     .setNameLocalization('ja', 'モデレーションログ設定')
     .setDescription('モデレーションログを送るチャンネルを設定します')
@@ -352,7 +346,6 @@ const slashCommands = [
 ];
 
 const commandAliases = {
-  status: ['status', '状態'],
   setmodlog: ['setmodlog', 'モデレーションログ設定'],
   setinvitelog: ['setinvitelog', '招待ログ設定'],
   settimeout: ['settimeout', 'タイムアウト設定', 'timeout'],
@@ -374,7 +367,6 @@ function getCommandKey(command) {
 }
 
 const commandDescriptions = {
-  status: '現在の対策設定と招待管理状態を表示します。',
   setmodlog: 'モデレーションログを送るチャンネルを設定します。',
   setinvitelog: '招待ログを送るチャンネルを設定します。',
   settimeout: 'タイムアウト時間を分単位で設定します。',
@@ -394,34 +386,35 @@ function isMod(member) {
   return false;
 }
 
+async function setExternalAppsRestriction(guild, restricted) {
+  const channels = [...guild.channels.cache.values()];
+  const roles = [...guild.roles.cache.values()];
+  let updatedCount = 0;
+  let failedCount = 0;
+
+  for (const channel of channels) {
+    for (const role of roles) {
+      try {
+        await channel.permissionOverwrites.edit(role, {
+          UseExternalApps: restricted ? false : null,
+        }, { reason: restricted ? '外部アプリコマンド制限を有効化' : '外部アプリコマンド制限を無効化' });
+        updatedCount++;
+      } catch (error) {
+        failedCount++;
+        console.warn(`外部アプリ権限の更新に失敗しました (${channel.id}/${role.id}): ${error.message}`);
+      }
+    }
+  }
+
+  return { updatedCount, failedCount };
+}
+
 function pruneTimestamps(list, windowMs, now) {
   return list.filter((timestamp) => now - timestamp < windowMs);
 }
 
 function isRaidModeEnabled(guildId) {
   return Boolean(raidModeByGuild.get(guildId));
-}
-
-function buildStatusEmbed(guildId) {
-  return new EmbedBuilder()
-    .setColor(0x00cc66)
-    .setTitle('迷惑行為対策と招待管理の状態')
-    .addFields(
-      { name: 'レイドモード', value: isRaidModeEnabled(guildId) ? '有効' : '無効' },
-      { name: 'スパムしきい値', value: String(config.spamThreshold) },
-      { name: 'スパム窓', value: `${config.spamWindowMs} ミリ秒` },
-      { name: 'レイドしきい値', value: String(config.raidJoinThreshold) },
-      { name: 'レイド窓', value: `${config.raidWindowMs} ミリ秒` },
-      { name: 'タイムアウト時間', value: `${config.timeoutDurationMinutes} 分` },
-      { name: 'スパム判定', value: isSpamProtectionEnabled(config) ? '有効' : '無効' },
-      { name: 'レイド判定', value: isRaidProtectionEnabled(config) ? '有効' : '無効' },
-      { name: '画像判定', value: isImageSpamDetectionEnabled(config) ? '有効' : '無効' },
-      { name: '外部アプリ制限', value: config.blockExternalApps ? '有効' : '無効' },
-      { name: 'モデレーションログ', value: config.moderationLogChannelId ? `<#${config.moderationLogChannelId}>` : '未設定' },
-      { name: '招待ログ', value: config.inviteLogChannelId ? `<#${config.inviteLogChannelId}>` : '未設定' },
-      { name: '招待パネル設置先', value: config.invitePanelChannelId ? `<#${config.invitePanelChannelId}>` : '未設定' },
-      { name: 'モデレーター役職', value: config.modRoleId ? `<@&${config.modRoleId}>` : '未設定' },
-    );
 }
 
 function buildInvitePanelPayload() {
@@ -746,6 +739,33 @@ client.on(Events.InviteDelete, async (invite) => {
   saveConfig();
 });
 
+client.on(Events.ChannelCreate, async (channel) => {
+  if (!config.blockExternalApps || !channel.guild) return;
+
+  try {
+    const roles = [...channel.guild.roles.cache.values()];
+    for (const role of roles) {
+      await channel.permissionOverwrites.edit(role, {
+        UseExternalApps: false,
+      }, { reason: '外部アプリコマンド制限を適用' });
+    }
+  } catch (error) {
+    console.warn(`新規チャンネルへの外部アプリ権限適用に失敗しました (${channel.id}): ${error.message}`);
+  }
+});
+
+client.on(Events.GuildRoleCreate, async (role) => {
+  if (!config.blockExternalApps) return;
+
+  for (const channel of role.guild.channels.cache.values()) {
+    await channel.permissionOverwrites.edit(role, {
+      UseExternalApps: false,
+    }, { reason: '外部アプリコマンド制限を適用' }).catch((error) => {
+      console.warn(`新規ロールへの外部アプリ権限適用に失敗しました (${channel.id}/${role.id}): ${error.message}`);
+    });
+  }
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton()) {
     if (interaction.customId === invitePanelButtonId) {
@@ -761,22 +781,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  const commandKey = getCommandKey(interaction.commandName);
+  if (!Object.prototype.hasOwnProperty.call(commandDescriptions, commandKey)) {
+    return;
+  }
+
   if (!isMod(interaction.member) && interaction.commandName !== 'commands') {
     await interaction.reply({ content: 'モデレーターのみがこのコマンドを使用できます。', ephemeral: true });
     return;
   }
 
-  const commandKey = getCommandKey(interaction.commandName);
-
-  if (commandKey === 'status') {
-    await interaction.reply({ embeds: [buildStatusEmbed(interaction.guildId)], ephemeral: true });
-    return;
-  }
-
   if (commandKey === 'setmodlog') {
+    await interaction.deferReply({ ephemeral: true });
     const channel = interaction.options.getChannel('channel');
     if (!channel?.isTextBased?.()) {
-      await interaction.reply({ content: 'テキストチャンネルを指定してください。', ephemeral: true });
+      await interaction.editReply({ content: 'テキストチャンネルを指定してください。' });
       return;
     }
 
@@ -790,17 +809,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setDescription('これ以降のモデレーションログを送信します。')
         .setTimestamp();
       await channel.send({ embeds: [testEmbed] });
-      await interaction.reply({ content: `モデレーションログを ${channel} に設定し、テスト投稿を送信しました。`, ephemeral: true });
+      await interaction.editReply({ content: `モデレーションログを ${channel} に設定し、テスト投稿を送信しました。` });
     } catch (error) {
-      await interaction.reply({ content: `モデレーションログを ${channel} に設定しましたが、テスト投稿に失敗しました。${error.message}`, ephemeral: true });
+      await interaction.editReply({ content: `モデレーションログを ${channel} に設定しましたが、テスト投稿に失敗しました。${error.message}` });
     }
     return;
   }
 
   if (commandKey === 'setinvitelog') {
+    await interaction.deferReply({ ephemeral: true });
     const channel = interaction.options.getChannel('channel');
     if (!channel?.isTextBased?.()) {
-      await interaction.reply({ content: 'テキストチャンネルを指定してください。', ephemeral: true });
+      await interaction.editReply({ content: 'テキストチャンネルを指定してください。' });
       return;
     }
 
@@ -814,50 +834,68 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setDescription('これ以降の招待ログを送信します。')
         .setTimestamp();
       await channel.send({ embeds: [testEmbed] });
-      await interaction.reply({ content: `招待ログを ${channel} に設定し、テスト投稿を送信しました。`, ephemeral: true });
+      await interaction.editReply({ content: `招待ログを ${channel} に設定し、テスト投稿を送信しました。` });
     } catch (error) {
-      await interaction.reply({ content: `招待ログを ${channel} に設定しましたが、テスト投稿に失敗しました。${error.message}`, ephemeral: true });
+      await interaction.editReply({ content: `招待ログを ${channel} に設定しましたが、テスト投稿に失敗しました。${error.message}` });
     }
     return;
   }
 
   if (commandKey === 'settimeout') {
+    await interaction.deferReply({ ephemeral: true });
     const minutes = interaction.options.getInteger('minutes');
     config.timeoutDurationMinutes = minutes;
     saveConfig();
-    await interaction.reply({ content: `タイムアウト時間を ${minutes} 分に設定しました。`, ephemeral: true });
+    await interaction.editReply({ content: `タイムアウト時間を ${minutes} 分に設定しました。` });
     return;
   }
 
   if (commandKey === 'setspam') {
+    await interaction.deferReply({ ephemeral: true });
     const threshold = interaction.options.getInteger('threshold');
     const windowMs = interaction.options.getInteger('window');
     config.spamThreshold = threshold;
     config.spamWindowMs = windowMs;
     saveConfig();
-    await interaction.reply({ content: `スパム設定を更新しました。しきい値: ${threshold} 回 / 窓: ${windowMs} ミリ秒。`, ephemeral: true });
+    await interaction.editReply({ content: `スパム設定を更新しました。しきい値: ${threshold} 回 / 窓: ${windowMs} ミリ秒。` });
     return;
   }
 
   if (commandKey === 'setraid') {
+    await interaction.deferReply({ ephemeral: true });
     const threshold = interaction.options.getInteger('threshold');
     const windowMs = interaction.options.getInteger('window');
     config.raidJoinThreshold = threshold;
     config.raidWindowMs = windowMs;
     saveConfig();
-    await interaction.reply({ content: `レイド設定を更新しました。しきい値: ${threshold} 回 / 窓: ${windowMs} ミリ秒。`, ephemeral: true });
+    await interaction.editReply({ content: `レイド設定を更新しました。しきい値: ${threshold} 回 / 窓: ${windowMs} ミリ秒。` });
     return;
   }
 
   if (commandKey === 'blockapps') {
+    await interaction.deferReply({ ephemeral: true });
+    if (!interaction.member.permissions?.has(PermissionFlagsBits.Administrator)) {
+      await interaction.editReply({ content: 'サーバー全体の外部アプリ制限は管理者のみ変更できます。' });
+      return;
+    }
+
     const mode = interaction.options.getString('mode');
-    config.blockExternalApps = mode === 'on';
+    const restricted = mode === 'on';
+    const result = await setExternalAppsRestriction(interaction.guild, restricted);
+    config.blockExternalApps = restricted;
     saveConfig();
-    await interaction.reply({ content: `外部アプリ利用制限を ${mode === 'on' ? '有効' : '無効'} にしました。`, ephemeral: true });
+    await interaction.editReply({
+      content: [
+        `外部Botのコマンド利用制限を ${restricted ? '有効' : '無効'} にしました。`,
+        `更新: ${result.updatedCount}チャンネル / 失敗: ${result.failedCount}チャンネル`,
+        restricted ? 'Discordの権限で外部アプリコマンドを拒否します。' : '外部アプリコマンドの拒否を解除しました。',
+      ].join('\n'),
+    });
     return;
   }
 
   if (commandKey === 'setprotection') {
+    await interaction.deferReply({ ephemeral: true });
     const target = interaction.options.getString('target');
     const mode = interaction.options.getString('mode');
     const enabled = mode === 'on';
@@ -872,20 +910,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     saveConfig();
     const label = target === 'spam' ? 'スパム判定' : target === 'raid' ? 'レイド判定' : '画像判定';
-    await interaction.reply({ content: `${label} を ${enabled ? '有効' : '無効'} にしました。`, ephemeral: true });
+    await interaction.editReply({ content: `${label} を ${enabled ? '有効' : '無効'} にしました。` });
     return;
   }
 
   if (commandKey === 'setmodrole') {
+    await interaction.deferReply({ ephemeral: true });
     if (!interaction.member.permissions?.has(PermissionFlagsBits.Administrator)) {
-      await interaction.reply({ content: '管理者のみがモデレーター役職を変更できます。', ephemeral: true });
+      await interaction.editReply({ content: '管理者のみがモデレーター役職を変更できます。' });
       return;
     }
 
     const role = interaction.options.getRole('role');
     config.modRoleId = role.id;
     saveConfig();
-    await interaction.reply({ content: `モデレーター役職を ${role} に設定しました。`, ephemeral: true });
+    await interaction.editReply({ content: `モデレーター役職を ${role} に設定しました。` });
     return;
   }
 

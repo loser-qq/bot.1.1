@@ -235,8 +235,13 @@ db.exec(`
     slot INTEGER NOT NULL,
     label TEXT NOT NULL,
     voice_channel_id TEXT NOT NULL,
+    category_id TEXT,
+    visibility_role_id TEXT,
+    user_limit INTEGER NOT NULL DEFAULT 0,
     visibility_mode TEXT NOT NULL,
     price INTEGER NOT NULL,
+    extension_price INTEGER NOT NULL DEFAULT 1,
+    extension_duration_minutes INTEGER NOT NULL DEFAULT 1,
     duration_minutes INTEGER NOT NULL,
     PRIMARY KEY (guild_id, panel_key, slot)
   );
@@ -249,6 +254,9 @@ db.exec(`
     mode TEXT NOT NULL,
     buyer_id TEXT NOT NULL,
     is_temporary INTEGER NOT NULL DEFAULT 0,
+    extension_price INTEGER NOT NULL DEFAULT 1,
+    duration_minutes INTEGER NOT NULL DEFAULT 1,
+    extension_duration_minutes INTEGER NOT NULL DEFAULT 1,
     expires_at INTEGER NOT NULL,
     PRIMARY KEY (guild_id, voice_channel_id)
   );
@@ -385,6 +393,32 @@ if (!vcVendingPurchaseColumns.includes('template_voice_channel_id')) {
 }
 if (!vcVendingPurchaseColumns.includes('text_channel_id')) {
   db.prepare('ALTER TABLE vc_vending_purchases ADD COLUMN text_channel_id TEXT').run();
+}
+if (!vcVendingPurchaseColumns.includes('extension_price')) {
+  db.prepare('ALTER TABLE vc_vending_purchases ADD COLUMN extension_price INTEGER NOT NULL DEFAULT 1').run();
+}
+if (!vcVendingPurchaseColumns.includes('duration_minutes')) {
+  db.prepare('ALTER TABLE vc_vending_purchases ADD COLUMN duration_minutes INTEGER NOT NULL DEFAULT 1').run();
+}
+if (!vcVendingPurchaseColumns.includes('extension_duration_minutes')) {
+  db.prepare('ALTER TABLE vc_vending_purchases ADD COLUMN extension_duration_minutes INTEGER NOT NULL DEFAULT 1').run();
+}
+
+const vcVendingProductColumns = db.prepare('PRAGMA table_info(vc_vending_products_multi)').all().map(row => row.name);
+if (!vcVendingProductColumns.includes('category_id')) {
+  db.prepare('ALTER TABLE vc_vending_products_multi ADD COLUMN category_id TEXT').run();
+}
+if (!vcVendingProductColumns.includes('visibility_role_id')) {
+  db.prepare('ALTER TABLE vc_vending_products_multi ADD COLUMN visibility_role_id TEXT').run();
+}
+if (!vcVendingProductColumns.includes('user_limit')) {
+  db.prepare('ALTER TABLE vc_vending_products_multi ADD COLUMN user_limit INTEGER NOT NULL DEFAULT 0').run();
+}
+if (!vcVendingProductColumns.includes('extension_price')) {
+  db.prepare('ALTER TABLE vc_vending_products_multi ADD COLUMN extension_price INTEGER NOT NULL DEFAULT 1').run();
+}
+if (!vcVendingProductColumns.includes('extension_duration_minutes')) {
+  db.prepare('ALTER TABLE vc_vending_products_multi ADD COLUMN extension_duration_minutes INTEGER NOT NULL DEFAULT 1').run();
 }
 
 function getBalance(userId, guildId) {
@@ -719,6 +753,16 @@ function getVendingPanels(guildId) {
   return db.prepare('SELECT * FROM vending_panels_multi WHERE guild_id = ? ORDER BY panel_key').all(guildId);
 }
 
+function deleteVendingPanel(guildId, panelKey) {
+  const key = normalizePanelKey(panelKey);
+  const tx = db.transaction(() => {
+    const productsDeleted = db.prepare('DELETE FROM vending_products_multi WHERE guild_id = ? AND panel_key = ?').run(guildId, key).changes;
+    const panelDeleted = db.prepare('DELETE FROM vending_panels_multi WHERE guild_id = ? AND panel_key = ?').run(guildId, key).changes;
+    return { panelDeleted, productsDeleted };
+  });
+  return tx();
+}
+
 function setVendingLogChannel(guildId, panelKey, channelId) {
   const key = normalizePanelKey(panelKey);
   db.prepare(`
@@ -830,22 +874,30 @@ function normalizeVcVisibilityMode(mode) {
   return raw === 'public' ? 'public' : 'private';
 }
 
-function setVcVendingProduct(guildId, panelKey, slot, label, voiceChannelId, visibilityMode, price, durationMinutes) {
+function setVcVendingProduct(guildId, panelKey, slot, label, categoryId, visibilityRoleId, userLimit, visibilityMode, price, extensionPrice, durationMinutes, extensionDurationMinutes) {
   const key = normalizePanelKey(panelKey);
   const safeSlot = Math.max(1, Math.min(5, Math.floor(slot)));
   const safePrice = Math.max(1, Math.floor(price));
+  const safeExtensionPrice = Math.max(1, Math.floor(extensionPrice));
+  const safeExtensionDuration = Math.max(1, Math.floor(extensionDurationMinutes));
+  const safeUserLimit = Math.max(0, Math.min(99, Math.floor(userLimit)));
   const safeDuration = Math.max(1, Math.floor(durationMinutes));
   const mode = normalizeVcVisibilityMode(visibilityMode);
   db.prepare(`
-    INSERT INTO vc_vending_products_multi (guild_id, panel_key, slot, label, voice_channel_id, visibility_mode, price, duration_minutes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO vc_vending_products_multi (guild_id, panel_key, slot, label, voice_channel_id, category_id, visibility_role_id, user_limit, visibility_mode, price, extension_price, extension_duration_minutes, duration_minutes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id, panel_key, slot) DO UPDATE SET
       label = excluded.label,
       voice_channel_id = excluded.voice_channel_id,
+      category_id = excluded.category_id,
+      visibility_role_id = excluded.visibility_role_id,
+      user_limit = excluded.user_limit,
       visibility_mode = excluded.visibility_mode,
       price = excluded.price,
+      extension_price = excluded.extension_price,
+        extension_duration_minutes = excluded.extension_duration_minutes,
       duration_minutes = excluded.duration_minutes
-  `).run(guildId, key, safeSlot, label, voiceChannelId, mode, safePrice, safeDuration);
+      `).run(guildId, key, safeSlot, label, categoryId, categoryId, visibilityRoleId, safeUserLimit, mode, safePrice, safeExtensionPrice, safeExtensionDuration, safeDuration);
 }
 
 function deleteVcVendingProduct(guildId, panelKey, slot) {
@@ -857,12 +909,12 @@ function deleteVcVendingProduct(guildId, panelKey, slot) {
 function getVcVendingProduct(guildId, panelKey, slot) {
   const key = normalizePanelKey(panelKey);
   const safeSlot = Math.max(1, Math.min(5, Math.floor(slot)));
-  return db.prepare('SELECT slot, label, voice_channel_id, visibility_mode, price, duration_minutes FROM vc_vending_products_multi WHERE guild_id = ? AND panel_key = ? AND slot = ?').get(guildId, key, safeSlot) || null;
+  return db.prepare('SELECT * FROM vc_vending_products_multi WHERE guild_id = ? AND panel_key = ? AND slot = ?').get(guildId, key, safeSlot) || null;
 }
 
 function getVcVendingProducts(guildId, panelKey) {
   const key = normalizePanelKey(panelKey);
-  return db.prepare('SELECT slot, label, voice_channel_id, visibility_mode, price, duration_minutes FROM vc_vending_products_multi WHERE guild_id = ? AND panel_key = ? ORDER BY slot').all(guildId, key);
+  return db.prepare('SELECT * FROM vc_vending_products_multi WHERE guild_id = ? AND panel_key = ? ORDER BY slot').all(guildId, key);
 }
 
 function deleteVcVendingPanel(guildId, panelKey) {
@@ -875,25 +927,31 @@ function deleteVcVendingPanel(guildId, panelKey) {
   return tx();
 }
 
-function upsertVcVendingPurchase(guildId, voiceChannelId, mode, buyerId, expiresAt, isTemporary = 0, templateVoiceChannelId = null, textChannelId = null) {
+function upsertVcVendingPurchase(guildId, voiceChannelId, mode, buyerId, expiresAt, isTemporary = 0, templateVoiceChannelId = null, textChannelId = null, extensionPrice = 1, durationMinutes = 1, extensionDurationMinutes = 1) {
   const safeExpiresAt = Math.max(0, Math.floor(expiresAt));
+  const safeExtensionPrice = Math.max(1, Math.floor(extensionPrice));
+  const safeDuration = Math.max(1, Math.floor(durationMinutes));
+  const safeExtensionDuration = Math.max(1, Math.floor(extensionDurationMinutes));
   const normalizedMode = normalizeVcVisibilityMode(mode);
   const temporaryFlag = isTemporary ? 1 : 0;
   db.prepare(`
-    INSERT INTO vc_vending_purchases (guild_id, voice_channel_id, template_voice_channel_id, text_channel_id, mode, buyer_id, is_temporary, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO vc_vending_purchases (guild_id, voice_channel_id, template_voice_channel_id, text_channel_id, mode, buyer_id, is_temporary, extension_price, duration_minutes, extension_duration_minutes, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id, voice_channel_id) DO UPDATE SET
       template_voice_channel_id = excluded.template_voice_channel_id,
       text_channel_id = excluded.text_channel_id,
       mode = excluded.mode,
       buyer_id = excluded.buyer_id,
       is_temporary = excluded.is_temporary,
-      expires_at = excluded.expires_at
-  `).run(guildId, voiceChannelId, templateVoiceChannelId || null, textChannelId || null, normalizedMode, buyerId, temporaryFlag, safeExpiresAt);
+        extension_price = excluded.extension_price,
+        duration_minutes = excluded.duration_minutes,
+          extension_duration_minutes = excluded.extension_duration_minutes,
+          expires_at = excluded.expires_at
+        `).run(guildId, voiceChannelId, templateVoiceChannelId || null, textChannelId || null, normalizedMode, buyerId, temporaryFlag, safeExtensionPrice, safeDuration, safeExtensionDuration, safeExpiresAt);
 }
 
 function getVcVendingPurchase(guildId, voiceChannelId) {
-  return db.prepare('SELECT mode, buyer_id, is_temporary, template_voice_channel_id, text_channel_id, expires_at FROM vc_vending_purchases WHERE guild_id = ? AND voice_channel_id = ?').get(guildId, voiceChannelId) || null;
+  return db.prepare('SELECT mode, buyer_id, is_temporary, template_voice_channel_id, text_channel_id, extension_price, duration_minutes, extension_duration_minutes, expires_at FROM vc_vending_purchases WHERE guild_id = ? AND voice_channel_id = ?').get(guildId, voiceChannelId) || null;
 }
 
 function getVcVendingPurchaseByBuyerAndTemplate(guildId, buyerId, templateVoiceChannelId) {
@@ -901,11 +959,15 @@ function getVcVendingPurchaseByBuyerAndTemplate(guildId, buyerId, templateVoiceC
 }
 
 function getExpiredVcVendingPurchases(nowMs) {
-  return db.prepare('SELECT guild_id, voice_channel_id, template_voice_channel_id, text_channel_id, mode, buyer_id, is_temporary, expires_at FROM vc_vending_purchases WHERE expires_at <= ? ORDER BY expires_at ASC').all(Math.max(0, Math.floor(nowMs)));
+  return db.prepare('SELECT guild_id, voice_channel_id, template_voice_channel_id, text_channel_id, mode, buyer_id, is_temporary, extension_price, duration_minutes, expires_at FROM vc_vending_purchases WHERE expires_at <= ? ORDER BY expires_at ASC').all(Math.max(0, Math.floor(nowMs)));
 }
 
 function deleteVcVendingPurchase(guildId, voiceChannelId) {
   return db.prepare('DELETE FROM vc_vending_purchases WHERE guild_id = ? AND voice_channel_id = ?').run(guildId, voiceChannelId).changes;
+}
+
+function extendVcVendingPurchase(guildId, voiceChannelId, expiresAt) {
+  return db.prepare('UPDATE vc_vending_purchases SET expires_at = ? WHERE guild_id = ? AND voice_channel_id = ?').run(Math.max(0, Math.floor(expiresAt)), guildId, voiceChannelId).changes;
 }
 
 function normalizeGachaPanelKey(panelKey) {
@@ -1025,6 +1087,26 @@ function upsertBoxGacha(guildId, gachaKey, name, singlePrice, tenPrice) {
 function getBoxGacha(guildId, gachaKey) {
   const key = normalizeBoxGachaKey(gachaKey);
   return db.prepare('SELECT guild_id, gacha_key, name, single_price, ten_price, created_at, updated_at FROM box_gachas WHERE guild_id = ? AND gacha_key = ?').get(guildId, key) || null;
+}
+
+function getBoxGachaSettings(guildId) {
+  return db.prepare(`
+    SELECT
+      g.gacha_key,
+      g.name,
+      g.single_price,
+      g.ten_price,
+      p.channel_id,
+      p.message_id,
+      p.title,
+      p.description,
+      l.channel_id AS log_channel_id
+    FROM box_gachas g
+    LEFT JOIN box_gacha_panels p ON p.guild_id = g.guild_id AND p.gacha_key = g.gacha_key
+    LEFT JOIN box_gacha_log_channels l ON l.guild_id = g.guild_id AND l.gacha_key = g.gacha_key
+    WHERE g.guild_id = ?
+    ORDER BY g.gacha_key
+  `).all(guildId);
 }
 
 function setBoxGachaPrices(guildId, gachaKey, singlePrice, tenPrice) {
@@ -1337,6 +1419,7 @@ module.exports = {
   upsertVendingPanel,
   getVendingPanel,
   getVendingPanels,
+  deleteVendingPanel,
   setVendingLogChannel,
   getVendingLogChannel,
   setVendingProduct,
@@ -1362,6 +1445,7 @@ module.exports = {
   getVcVendingPurchaseByBuyerAndTemplate,
   getExpiredVcVendingPurchases,
   deleteVcVendingPurchase,
+  extendVcVendingPurchase,
   upsertGachaPanel,
   getGachaPanel,
   getGachaPanels,
@@ -1377,6 +1461,7 @@ module.exports = {
   normalizeRarity,
   upsertBoxGacha,
   getBoxGacha,
+  getBoxGachaSettings,
   setBoxGachaPrices,
   addBoxGachaProduct,
   deleteBoxGachaProduct,

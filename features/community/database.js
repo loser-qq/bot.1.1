@@ -352,6 +352,10 @@ function getAllTicketPanels(guildId) {
   return db.prepare('SELECT * FROM ticket_panels WHERE guild_id = ?').all(guildId);
 }
 
+function deleteTicketPanel(guildId, panelId) {
+  return db.prepare('DELETE FROM ticket_panels WHERE guild_id = ? AND id = ?').run(guildId, panelId).changes;
+}
+
 function createTicket(guildId, channelId, creatorId, panelId) {
   const result = db.prepare('INSERT INTO tickets (guild_id, channel_id, creator_id, panel_id) VALUES (?, ?, ?, ?)')
     .run(guildId, channelId, creatorId, panelId);
@@ -468,7 +472,7 @@ module.exports = {
   setJoinLogChannel, setLeaveLogChannel,
   setVcTransfer, getVcTransferByParent, getAllVcTransfers,
   addChildVc, removeChildVc, getChildVc, setChildVcOwner, getNextChildVcNumber,
-  createTicketPanel, updateTicketPanelLocation, getTicketPanel, getAllTicketPanels,
+  createTicketPanel, updateTicketPanelLocation, getTicketPanel, getAllTicketPanels, deleteTicketPanel,
   createTicket, getTicketByChannel, deleteTicket,
   createReactionRoleMessage, getAllReactionRoleMessages, getReactionRoleMessageById,
   setReactionRoleMapping, getReactionRoleMapping, getReactionRoleMappingsForMessage, getAllReactionRoleMappings,
