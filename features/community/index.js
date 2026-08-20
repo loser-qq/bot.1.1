@@ -1628,6 +1628,8 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    if (commandName === '設定状況') return;
+
     if (commandName === '設定状況') {
       if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
         await interaction.reply({ content: '❌ このコマンドは管理者または開発者専用です。', flags: MessageFlags.Ephemeral });
