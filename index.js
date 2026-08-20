@@ -34,7 +34,6 @@ const {
 } = require('discord.js');
 
 const path = require('path');
-const path = require('path');
 const db = require('./database.js');
 
 let economyDb;
