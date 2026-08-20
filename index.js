@@ -1,5 +1,4 @@
 require('dotenv').config();
-const path = require('path');
 
 process.on('uncaughtException', (err) => {
   process.stdout.write('[FATAL] uncaughtException: ' + err.message + '\n' + err.stack + '\n');
@@ -34,6 +33,7 @@ const {
   AttachmentBuilder,
 } = require('discord.js');
 
+const path = require('path');
 const path = require('path');
 const db = require('./database.js');
 
