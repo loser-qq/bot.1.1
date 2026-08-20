@@ -426,7 +426,7 @@ function formatRoleMentions(roleIds) {
 }
 
 const SHARED_APP_MODE = process.env.ONE_TOKEN_MODE === 'true';
-const COMMUNITY_BLOCKED_COMMANDS_IN_SHARED_MODE = new Set(['status', 'コマンド一覧', '設定状況', 'bot情報']);
+const COMMUNITY_BLOCKED_COMMANDS_IN_SHARED_MODE = new Set(['status', 'コマンド一覧', 'bot情報']);
 
 const commands = [
   new SlashCommandBuilder()
@@ -569,8 +569,8 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
-    .setName('設定状況')
-    .setDescription('[開発者] このサーバーの各種設定状況を表示します')
+    .setName('community設定状況')
+    .setDescription('[管理者] communityの設定状況を表示します')
     .addStringOption((opt) =>
       opt.setName('表示').setDescription('表示形式').setRequired(true)
         .addChoices(
@@ -597,6 +597,10 @@ async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(TOKEN);
   try {
     console.log('スラッシュコマンドを登録中...');
+    const registeredCommands = await rest.get(Routes.applicationCommands(CLIENT_ID));
+    for (const command of registeredCommands.filter((item) => item.name === '設定状況')) {
+      await rest.delete(Routes.applicationCommand(CLIENT_ID, command.id));
+    }
     for (const command of commands) {
       await rest.post(Routes.applicationCommands(CLIENT_ID), { body: command });
     }
@@ -1620,7 +1624,40 @@ client.on('interactionCreate', async (interaction) => {
           { name: '🔁 メッセージ転送', value: '/bot送信 メッセージリンク — 指定リンク先の本文をBOTが送信します' },
           { name: '💬 メッセージリンク自動表示', value: '/メッセージリンク表示 状態(on|off)' },
           { name: '📥📤 参加退出ログ', value: '/入室ログ チャンネル\n/退出ログ チャンネル' },
-          { name: '🛠 管理・開発者', value: '/コマンド一覧\n/設定状況 表示\n/bot情報 表示' }
+          { name: '🛠 管理・開発者', value: '/コマンド一覧\n/community設定状況 表示\n/economy設定状況 表示\n/security設定状況 表示\n/bot情報 表示' }
+        )
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [embed] });
+      return;
+    }
+
+    if (commandName === 'community設定状況') {
+      if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        await interaction.reply({ content: '❌ このコマンドは管理者または開発者専用です。', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const visibility = interaction.options.getString('表示');
+      const ephemeral = visibility === 'hidden';
+      await interaction.deferReply({ flags: ephemeral ? MessageFlags.Ephemeral : undefined });
+
+      const settings = db.getSettings(guild.id);
+      const vcTransfers = db.getAllVcTransfers(guild.id);
+      const ticketPanels = db.getAllTicketPanels(guild.id);
+      const rrMessages = db.getAllReactionRoleMessages(guild.id);
+      const ch = (id) => (id ? `<#${id}>` : '未設定');
+      const embed = new EmbedBuilder()
+        .setTitle('🎙 community設定状況')
+        .setColor(0x57f287)
+        .setDescription(`サーバー: **${guild.name}**`)
+        .addFields(
+          { name: '📥 入室ログ', value: ch(settings.join_log_channel_id), inline: true },
+          { name: '📤 退出ログ', value: ch(settings.leave_log_channel_id), inline: true },
+          { name: '💬 メッセージリンク自動表示', value: db.isMessageLinkPreviewEnabled(guild.id) ? 'オン' : 'オフ', inline: true },
+          { name: '🔊 VC転送設定数', value: `${vcTransfers.length}件`, inline: true },
+          { name: '🎫 チケットパネル数', value: `${ticketPanels.length}件`, inline: true },
+          { name: '🎭 RRメッセージ数', value: `${rrMessages.length}件`, inline: true },
         )
         .setTimestamp();
 
@@ -1629,8 +1666,7 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (commandName === '設定状況') return;
-
-    if (commandName === '設定状況') {
+    if (false) {
       if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
         await interaction.reply({ content: '❌ このコマンドは管理者または開発者専用です。', flags: MessageFlags.Ephemeral });
         return;

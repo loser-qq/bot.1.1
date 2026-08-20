@@ -266,7 +266,9 @@ function buildCommandListEmbed() {
       {
         name: '🔧 管理・開発者向け',
         value: [
-          '`/設定状況 表示` [管理者] 全モジュールの設定状況を表示',
+          '`/community設定状況 表示` [管理者] community設定を表示',
+          '`/economy設定状況 表示` [管理者] economy設定を表示',
+          '`/security設定状況 表示` [管理者] security設定を表示',
           '`/bot情報 表示` [開発者] 参加サーバー一覧と招待リンクを表示',
           '`/vc接続時間リセット ユーザー` [開発者] 指定ユーザーのVC接続時間をリセット',
           '`/vc接続時間全リセット` [開発者] 全ユーザーのVC接続時間をリセット',
@@ -1524,8 +1526,21 @@ const commands = [
       )),
 
   new SlashCommandBuilder()
-    .setName('設定状況')
-    .setDescription('[管理者] 全モジュールのサーバー設定状況を表示します')
+    .setName('economy設定状況')
+    .setDescription('[管理者] economyの設定状況を表示します')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(opt => opt
+      .setName('表示')
+      .setDescription('表示方法')
+      .setRequired(true)
+      .addChoices(
+        { name: '公開', value: 'public' },
+        { name: '非公開', value: 'hidden' },
+      )),
+
+  new SlashCommandBuilder()
+    .setName('security設定状況')
+    .setDescription('[管理者] securityの設定状況を表示します')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addStringOption(opt => opt
       .setName('表示')
@@ -2151,7 +2166,7 @@ client.on('interactionCreate', async interaction => {
 
     const { commandName, guild, member } = interaction;
 
-    if (process.env.ONE_TOKEN_MODE === 'true' && ['status', 'コマンド一覧', '設定状況', 'bot情報'].includes(commandName)) {
+    if (process.env.ONE_TOKEN_MODE === 'true' && ['status', 'コマンド一覧', 'bot情報'].includes(commandName)) {
       return;
     }
 
@@ -2999,7 +3014,43 @@ client.on('interactionCreate', async interaction => {
       return;
     }
 
-    if (commandName === '設定状況') {
+    if (commandName === 'security設定状況') {
+      if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
+        await interaction.reply({ content: '❌ このコマンドは管理者専用です。', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const hidden = interaction.options.getString('表示', true) === 'hidden';
+      await interaction.deferReply({ flags: hidden ? MessageFlags.Ephemeral : undefined });
+
+      const none = '未設定';
+      const secConfig = db.getAppStateJson('security', 'config') || {};
+      const secEmbed = new EmbedBuilder()
+        .setTitle('🛡 security設定状況')
+        .setColor(0xed4245)
+        .setDescription(`サーバー: **${guild.name}**`)
+        .addFields(
+          { name: 'スパム判定', value: secConfig.spamProtectionEnabled !== false ? '有効' : '無効', inline: true },
+          { name: 'レイド判定', value: secConfig.raidProtectionEnabled !== false ? '有効' : '無効', inline: true },
+          { name: '画像スパム判定', value: secConfig.imageSpamDetectionEnabled !== false ? '有効' : '無効', inline: true },
+          { name: 'スパムしきい値', value: String(secConfig.spamThreshold ?? 6), inline: true },
+          { name: 'スパム窓', value: `${secConfig.spamWindowMs ?? 8000}ms`, inline: true },
+          { name: 'レイドしきい値', value: String(secConfig.raidJoinThreshold ?? 8), inline: true },
+          { name: 'レイド窓', value: `${secConfig.raidWindowMs ?? 20000}ms`, inline: true },
+          { name: 'タイムアウト時間', value: `${secConfig.timeoutDurationMinutes ?? 10}分`, inline: true },
+          { name: '外部アプリ制限', value: secConfig.blockExternalApps ? '有効' : '無効', inline: true },
+          { name: 'モデレーションログ', value: secConfig.moderationLogChannelId ? `<#${secConfig.moderationLogChannelId}>` : none, inline: true },
+          { name: '招待ログ', value: secConfig.inviteLogChannelId ? `<#${secConfig.inviteLogChannelId}>` : none, inline: true },
+          { name: '招待パネル設置先', value: secConfig.invitePanelChannelId ? `<#${secConfig.invitePanelChannelId}>` : none, inline: true },
+          { name: 'モデレーター役職', value: secConfig.modRoleId ? `<@&${secConfig.modRoleId}>` : none, inline: true },
+        )
+        .setTimestamp();
+
+      await interaction.editReply({ embeds: [secEmbed] });
+      return;
+    }
+
+    if (commandName === 'economy設定状況') {
       if (interaction.user.id !== DEVELOPER_ID && !member.permissions.has(PermissionFlagsBits.Administrator)) {
         await interaction.reply({ content: '❌ このコマンドは管理者専用です。', flags: MessageFlags.Ephemeral });
         return;
@@ -3020,6 +3071,9 @@ client.on('interactionCreate', async interaction => {
       // 経済設定 embed
       const economyEmbed = buildStatusEmbed(guild);
       economyEmbed.setTitle('💰 経済設定状況');
+
+      await interaction.editReply({ embeds: [economyEmbed] });
+      return;
 
       // コミュニティ設定 embed
       const vcTransferCount = db.getVcTransferCount(guild.id);
