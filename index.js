@@ -34,6 +34,7 @@ const {
   AttachmentBuilder,
 } = require('discord.js');
 
+const path = require('path');
 const db = require('./database.js');
 
 let economyDb;
@@ -57,6 +58,10 @@ for (const candidate of economyDbCandidates) {
 
 if (!economyDb) {
   throw new Error(`Failed to resolve economy database module. Tried: ${economyDbCandidates.join(', ')}`);
+}
+
+if (typeof db?.isMessageLinkPreviewEnabled !== 'function') {
+  throw new Error('[community-db] Missing isMessageLinkPreviewEnabled() in community database module.');
 }
 
 const client = new Client({
